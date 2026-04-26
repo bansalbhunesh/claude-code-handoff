@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+        ]
+      },
+      {
+        "matcher": "manual",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+        ]
+      }
+    ]
+  }
+}
