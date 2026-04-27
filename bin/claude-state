@@ -440,6 +440,10 @@ cmd_signal() {
   exec "$__cs_dir/modules/signal/signal.sh" "$@"
 }
 
+cmd_memory() {
+  exec "$__cs_dir/modules/memory/memory.sh" "$@"
+}
+
 cmd_help() {
   cat <<USAGE
 claude-state $CS_VERSION — persistent state for Claude Code (handoff packets, workspaces).
@@ -454,6 +458,9 @@ Commands:
   workspaces ...             Manage workspaces (list, show, rebuild, rename).
   signal <packet> [--explain] [--threshold N] [--raw]
                              Re-score a packet's reasoning section.
+  memory ...                 Typed CLI for the harness's markdown memory
+                             store. 'memory query --json' emits a versioned
+                             (v=1) plugin contract.
   search <pattern>           Find packets containing <pattern> (case-insensitive grep).
   chain [<session-id>]       Walk the continues_from chain backwards (default: latest).
   edit <session-id>          Open a packet in \$EDITOR for redaction.
@@ -490,6 +497,7 @@ case "${1:-}" in
   resume)          shift; cmd_resume "$@" ;;
   workspaces|ws)   shift; cmd_workspaces "$@" ;;
   signal)          shift; cmd_signal "$@" ;;
+  memory|mem)      shift; cmd_memory "$@" ;;
   search)          shift; cmd_search "$@" ;;
   chain)           shift; cmd_chain "$@" ;;
   edit)            shift; cmd_edit "$@" ;;
