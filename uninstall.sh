@@ -6,6 +6,10 @@
 
 set -euo pipefail
 
+# Same MSYS path-translation defeat as install.sh — see comment there.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
 purge=0
 case "${1:-}" in

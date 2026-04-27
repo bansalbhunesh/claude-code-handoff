@@ -248,18 +248,32 @@ test_resume_here_errors_when_unknown_workspace() {
 test_resume_keywords_picks_highest_score() {
   local home; home=$(tmpdir)
   mkdir -p "$home/proj"
-  local tx="$home/tx.jsonl"
-  make_minimal_transcript "$tx"
-  # Three packets with handcrafted bodies post-snapshot.
-  invoke_snapshot "$home" "kw_a" "$tx" "$home/proj"
-  invoke_snapshot "$home" "kw_b" "$tx" "$home/proj"
-  invoke_snapshot "$home" "kw_c" "$tx" "$home/proj"
-  printf '\n## Notes\nauth bug\n' >> "$home/.claude/handoff/kw_a.md"
-  printf '\n## Notes\nauth bug middleware\n' >> "$home/.claude/handoff/kw_b.md"
-  printf '\n## Notes\nrendering\n' >> "$home/.claude/handoff/kw_c.md"
+  # Embed the keyword text in each transcript's assistant message so the
+  # snapshot writes it through the normal flow (mv from mktemp). Earlier
+  # versions of this test post-edited packets with `>>`, which collided
+  # with the chmod-600 packet mode on some platforms (Git Bash) and the
+  # grep loop saw empty bodies.
+  local tx_a="$home/tx_a.jsonl"
+  local tx_b="$home/tx_b.jsonl"
+  local tx_c="$home/tx_c.jsonl"
+  make_keyword_transcript() {
+    local path="$1" body="$2"
+    {
+      jq -nc '{type:"user", message:{content:"goal"}}'
+      jq -nc --arg t "$body" '{type:"assistant", message:{content:[{type:"text", text:$t}]}}'
+    } > "$path"
+  }
+  make_keyword_transcript "$tx_a" "auth bug in middleware-adjacent layer"
+  make_keyword_transcript "$tx_b" "auth bug middleware fix landed"
+  make_keyword_transcript "$tx_c" "unrelated rendering pipeline tweak"
+  invoke_snapshot "$home" "kw_a" "$tx_a" "$home/proj"
+  invoke_snapshot "$home" "kw_b" "$tx_b" "$home/proj"
+  invoke_snapshot "$home" "kw_c" "$tx_c" "$home/proj"
   local out
   out=$(CLAUDE_HOME="$home/.claude" "$CLI" resume --keywords "auth middleware")
-  # kw_b matches both keywords (score 2); kw_a matches one (score 1); kw_c matches none.
+  # kw_a matches "auth" + "middleware" via "middleware-adjacent" (score 2),
+  # kw_b matches both (score 2), kw_c matches neither (0). Tiebreak between
+  # kw_a and kw_b is recency: kw_b was snapshotted later → wins.
   assert 'echo "$out" | grep -q "claude-state resume: kw_b"' \
     "resume --keywords must pick the highest-scoring packet (kw_b)"
 }
