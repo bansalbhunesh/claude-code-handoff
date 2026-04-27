@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Windows runner in CI matrix.** `windows-latest` (Git Bash) is now tested on every push and PR alongside `ubuntu-latest` and `macos-latest`.
+- `is_windows` helper in `tests/lib.sh` for tests that need to skip POSIX-only assertions (mode bits) on NTFS.
+- `.gitattributes` forcing LF line endings on shell + JSON + YAML + Markdown so Windows checkouts don't get CRLF that bash/jq mishandle.
+
+### Fixed
+- **Cross-platform `stat`** in `bin/claude-handoff` and `tests/lib.sh`. The previous order `stat -f %Lp || stat -c %a` was wrong on Linux: `stat -f` runs *filesystem* stat there and succeeds with garbage, never reaching the fallback. Flipped to try GNU `-c` first; macOS still works because `stat -c` fails cleanly and falls through to `-f`.
+- CI `shellcheck` failures from intentional patterns (literal `$HOME` in single-quoted strings for hook-runner expansion, eval-driven asserts in tests). Suppressed via `.shellcheckrc` (`SC1091`, `SC2012`, `SC2016`, `SC2317`, `SC2329`) and per-file `# shellcheck disable=SC2034` on test files.
+- Real `SC2155` warning in `bin/claude-handoff:human_age`: split `local now=$(date)` so the subprocess's exit code isn't masked.
+
+### Changed
+- Mode-bits tests (`packet mode 600`, `handoff dir mode 700`) skip on Windows since NTFS doesn't enforce POSIX modes — the `chmod` call still happens, it just isn't observable. Tests that exercise behavior (snapshot writing, install merging, CLI flows) continue to run there.
+
 ## [0.3.0] - 2026-04-27
 
 ### Added

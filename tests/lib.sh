@@ -94,3 +94,13 @@ file_mode() {
 mklink() {
   ln -s "$1" "$2" 2>/dev/null
 }
+
+# Detect Git Bash / MSYS / Cygwin on Windows. NTFS doesn't enforce POSIX
+# file modes, so chmod-based assertions are meaningless there — tests
+# that probe permission bits should skip when this returns 0.
+is_windows() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    *) return 1 ;;
+  esac
+}

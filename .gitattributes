@@ -1,0 +1,16 @@
+# Force LF line endings on shell scripts and config so Windows checkouts
+# don't get CRLF — bash + jq don't tolerate CRLF in places we care about
+# (heredoc terminators, jq input files, etc.).
+*.sh        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.md        text eol=lf
+LICENSE     text eol=lf
+.shellcheckrc text eol=lf
+bin/*       text eol=lf
+
+# Mark binaries (none today, but defensive).
+*.png       binary
+*.jpg       binary
+*.gif       binary

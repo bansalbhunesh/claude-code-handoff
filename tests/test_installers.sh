@@ -191,6 +191,10 @@ test_no_backup_spam_on_noop_rerun() {
 }
 
 test_handoff_dir_mode_700_after_install() {
+  if is_windows; then
+    assert 'true' "POSIX modes not enforced on Windows; skipping"
+    return 0
+  fi
   local tmp; tmp=$(tmpdir)
   CLAUDE_HOME="$tmp" bash "$INSTALL" >/dev/null
   assert '[ -d "$tmp/handoff" ]' "install must create handoff/"
