@@ -2,12 +2,24 @@
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
 [![Tests: 133/133](https://img.shields.io/badge/tests-133%2F133-brightgreen.svg)](tests/)
+[![Homebrew](https://img.shields.io/badge/homebrew-claude--state-orange.svg)](https://github.com/bansalbhunesh/homebrew-claude-state)
 
 > **Persistent state for Claude Code: snapshot every session before compaction, group packets by project, surface only the signal, and expose your auto-memory through a typed plugin contract.**
 
 ![demo](assets/demo.gif)
+
+```bash
+brew tap bansalbhunesh/claude-state
+brew install claude-state
+bash $(brew --prefix claude-state)/share/claude-state/install.sh   # wires Claude Code hooks
+```
+
+Then in any Claude Code session: `/resume`.
+
+<details>
+<summary>No Homebrew? Install from source.</summary>
 
 ```bash
 git clone https://github.com/bansalbhunesh/claude-code-handoff.git
@@ -15,9 +27,7 @@ cd claude-code-handoff
 bash install.sh             # add --auto for SessionStart auto-resume
 ```
 
-Then in any Claude Code session: `/resume`.
-
-> A Homebrew tap (`brew tap bansalbhunesh/claude-state && brew install claude-state`) is queued — see [#5](https://github.com/bansalbhunesh/claude-code-handoff/issues/5).
+</details>
 
 > **Renamed in v0.4.0** (was `claude-code-handoff`). The `claude-handoff` deprecation shim keeps forwarding through one minor cycle. See [MIGRATION.md](MIGRATION.md) and [PLAN.md](PLAN.md).
 
@@ -38,15 +48,7 @@ No daemon. No code change. ~250 lines of bash + jq, one install, one uninstall. 
 
 ## Quick start
 
-The hero block above has the install — repeating it here for completeness:
-
-```bash
-git clone https://github.com/bansalbhunesh/claude-code-handoff.git
-cd claude-code-handoff
-./install.sh
-```
-
-That's it. Compaction now leaves a packet behind. Resume with:
+Install via Homebrew (the install line in the hero above), then in any Claude Code session run:
 
 ```
 /resume
@@ -55,8 +57,10 @@ That's it. Compaction now leaves a packet behind. Resume with:
 Want it fully automatic (no typing `/resume`)?
 
 ```bash
-./install.sh --auto
+bash $(brew --prefix claude-state)/share/claude-state/install.sh --auto
 ```
+
+(Or, if you installed from source, `bash install.sh --auto` from the cloned repo.)
 
 A `SessionStart` hook will inject the packet on every post-compaction or resumed session. Opt-in because some of the underlying mechanism is undocumented — see [Limitations](#limitations).
 
