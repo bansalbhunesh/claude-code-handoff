@@ -68,18 +68,31 @@ jobs:
         run: |
           set -euo pipefail
           files=()
-          for f in install.sh uninstall.sh bin/claude-handoff; do
+          # Top-level scripts + the CLI entry points (claude-state is the
+          # real CLI in v0.4+; claude-handoff stays as a deprecation shim).
+          for f in install.sh uninstall.sh bin/claude-state bin/claude-handoff; do
             if [ -f "$f" ]; then
               files+=("$f")
             fi
           done
-          for d in scripts tests; do
-            if [ -d "$d" ]; then
-              while IFS= read -r -d '' file; do
-                files+=("$file")
-              done < <(find "$d" -maxdepth 1 -type f -name '*.sh' -print0)
-            fi
-          done
+          # Sourced helper libs — flat under lib/.
+          if [ -d lib ]; then
+            while IFS= read -r -d '' file; do
+              files+=("$file")
+            done < <(find lib -maxdepth 1 -type f -name '*.sh' -print0)
+          fi
+          # Hook + subcommand modules — modules/<feature>/*.sh.
+          if [ -d modules ]; then
+            while IFS= read -r -d '' file; do
+              files+=("$file")
+            done < <(find modules -mindepth 2 -maxdepth 2 -type f -name '*.sh' -print0)
+          fi
+          # Test files (top-level only; the suite has no nested *.sh).
+          if [ -d tests ]; then
+            while IFS= read -r -d '' file; do
+              files+=("$file")
+            done < <(find tests -maxdepth 1 -type f -name '*.sh' -print0)
+          fi
           if [ ${#files[@]} -eq 0 ]; then
             echo "No shell files found." >&2
             exit 1

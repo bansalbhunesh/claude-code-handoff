@@ -35,7 +35,6 @@ event=$(printf '%s' "$payload" | jq -r '.hook_event_name // "unknown"' 2>/dev/nu
 
 is_valid_session_id "$session_id" || exit 0
 
-claude_dir=$(cs_claude_dir)
 handoff_dir=$(cs_handoff_dir)
 # Refuse to write through a symlinked handoff directory.
 [ -L "$handoff_dir" ] && exit 0

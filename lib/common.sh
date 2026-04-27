@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # lib/common.sh — shared helpers for claude-state.
 # Sourced by bin/claude-state, modules/*/*.sh, and (transitively) tests/lib.sh.
 # Pure bash 3.2-compatible: no associative arrays, no ${var,,}, no mapfile.
