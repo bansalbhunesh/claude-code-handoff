@@ -89,10 +89,14 @@ file_mode() {
 }
 
 # Best-effort symlink creation, used by tests that probe symlink refusal.
-# Returns 0 if the symlink was created, 1 otherwise (e.g. on filesystems
-# that don't support them — bail the test in that case).
+# Returns 0 only if a real symlink was created. On filesystems that don't
+# support symlinks at all `ln -s` fails outright. On Git Bash (Windows)
+# without Developer Mode, `ln -s` silently makes a *copy* — so we also
+# verify with `[ -L ]` that the target is actually a symlink. Tests that
+# need a real symlink to validate refusal-of-symlink behavior should
+# skip when this returns non-zero.
 mklink() {
-  ln -s "$1" "$2" 2>/dev/null
+  ln -s "$1" "$2" 2>/dev/null && [ -L "$2" ]
 }
 
 # Detect Git Bash / MSYS / Cygwin on Windows. NTFS doesn't enforce POSIX
