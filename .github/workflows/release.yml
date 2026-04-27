@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+defaults:
+  run:
+    # Match CI: force bash everywhere for consistency.
+    shell: bash
+
+permissions:
+  # Needed so GITHUB_TOKEN can create/update the GitHub Release and upload assets.
+  contents: write
+
+jobs:
+  release:
+    name: release (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq shellcheck
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          bash --version | head -1
+          jq --version
+          shellcheck --version | head -2
+          uname -s
+
+      - name: Sanity test suite (release gate)
+        run: bash tests/run-all.sh
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          # github.ref_name is e.g. "v0.6.0"; strip the leading "v" for the asset name.
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tarball=claude-state-${version}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=claude-state-${version}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Build source tarball
+        run: |
+          set -euo pipefail
+          tarball="${{ steps.version.outputs.tarball }}"
+          # Stage out-of-tree so the tarball never contains itself, and so the
+          # excluded paths are reliably skipped regardless of GNU vs BSD tar.
+          staging="$(mktemp -d)"
+          tar --exclude='.git' \
+              --exclude='.github' \
+              --exclude='tests' \
+              -czf "${staging}/${tarball}" \
+              -C "${GITHUB_WORKSPACE}" .
+          mv "${staging}/${tarball}" "${GITHUB_WORKSPACE}/${tarball}"
+          ls -la "${tarball}"
+          # Quick sanity: confirm exclusions held.
+          if tar -tzf "${tarball}" | grep -E '^\./(\.git|\.github|tests)(/|$)'; then
+            echo "ERROR: tarball contains an excluded path" >&2
+            exit 1
+          fi
+
+      - name: Compute sha256 checksum
+        run: |
+          set -euo pipefail
+          tarball="${{ steps.version.outputs.tarball }}"
+          checksum="${{ steps.version.outputs.checksum }}"
+          # Write in standard `sha256sum` format: "<hash>  <filename>".
+          sha256sum "${tarball}" > "${checksum}"
+          cat "${checksum}"
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
+        with:
+          # Attach to the release for the pushed tag. Creates the release if it
+          # doesn't exist yet, otherwise updates the existing one.
+          tag_name: ${{ steps.version.outputs.tag }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.version.outputs.tarball }}
+            ${{ steps.version.outputs.checksum }}
