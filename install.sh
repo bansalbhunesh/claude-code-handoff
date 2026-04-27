@@ -66,7 +66,8 @@ mkdir -p \
   "$claude_dir/handoff" \
   "$claude_dir/claude-state/lib" \
   "$claude_dir/claude-state/modules/handoff" \
-  "$claude_dir/claude-state/modules/workspaces"
+  "$claude_dir/claude-state/modules/workspaces" \
+  "$claude_dir/claude-state/modules/signal"
 chmod 700 "$claude_dir/handoff" 2>/dev/null || true
 
 # Use rm-then-cp so foreign-owned existing files don't fail under set -e.
@@ -77,14 +78,16 @@ install_file() {
   [ -n "$mode" ] && chmod "$mode" "$dst"
 }
 
-install_file "$repo_dir/lib/common.sh"                        "$claude_dir/claude-state/lib/common.sh"                  644
-install_file "$repo_dir/lib/workspace.sh"                     "$claude_dir/claude-state/lib/workspace.sh"               644
-install_file "$repo_dir/modules/handoff/snapshot.sh"          "$claude_dir/claude-state/modules/handoff/snapshot.sh"    755
-install_file "$repo_dir/modules/handoff/resume.sh"            "$claude_dir/claude-state/modules/handoff/resume.sh"      755
+install_file "$repo_dir/lib/common.sh"                        "$claude_dir/claude-state/lib/common.sh"                    644
+install_file "$repo_dir/lib/workspace.sh"                     "$claude_dir/claude-state/lib/workspace.sh"                 644
+install_file "$repo_dir/lib/signal.sh"                        "$claude_dir/claude-state/lib/signal.sh"                    644
+install_file "$repo_dir/modules/handoff/snapshot.sh"          "$claude_dir/claude-state/modules/handoff/snapshot.sh"      755
+install_file "$repo_dir/modules/handoff/resume.sh"            "$claude_dir/claude-state/modules/handoff/resume.sh"        755
 install_file "$repo_dir/modules/workspaces/workspaces.sh"     "$claude_dir/claude-state/modules/workspaces/workspaces.sh" 755
-install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                            755
-install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                          755
-install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                          644
+install_file "$repo_dir/modules/signal/signal.sh"             "$claude_dir/claude-state/modules/signal/signal.sh"         755
+install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                              755
+install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                            755
+install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                            644
 
 # Best-effort cleanup of v0.3 layout. We delete the script files only;
 # we leave $claude_dir/scripts/ in place if it still has unrelated files.

@@ -22,6 +22,8 @@ fi
 . "$__cs_dir/lib/common.sh"
 # shellcheck source=../../lib/workspace.sh
 . "$__cs_dir/lib/workspace.sh"
+# shellcheck source=../../lib/signal.sh
+. "$__cs_dir/lib/signal.sh"
 
 payload=$(cat)
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)
@@ -126,16 +128,27 @@ files=$(jq -rs '
 ' "$transcript" 2>/dev/null || true)
 [ -z "$files" ] && files="(no file edits in this session)"
 
-# Last 5 assistant text blocks — where decisions, dead-ends, and intent live.
-recent=$(jq -rs '
+# Assistant text blocks (last 20 — was 5 in v0.4; M2 lets the signal
+# scorer triage a wider window without bloating the kept section).
+# Output is a JSON array of strings, fed to the signal filter.
+recent_blocks=$(jq -cs '
   [ .[]
     | select(.type == "assistant")
     | .message.content[]?
     | select(.type == "text")
     | .text ]
-  | .[-5:]
-  | join("\n\n---\n\n")
-' "$transcript" 2>/dev/null || true)
+  | .[-20:]
+' "$transcript" 2>/dev/null || printf '[]')
+[ -z "$recent_blocks" ] && recent_blocks='[]'
+
+# Run the signal scorer. Emits {threshold, kept[], dropped[]}.
+# HANDOFF_SIGNAL_MIN gates the threshold (default 3). HANDOFF_SIGNAL_DETAILS
+# gates whether dropped blocks survive in a collapsed <details> block at
+# packet bottom — defaults on (lossless), can be turned off with =0.
+recent=""
+if [ "$(printf '%s' "$recent_blocks" | jq 'length')" -gt 0 ]; then
+  recent=$(printf '%s' "$recent_blocks" | signal_filter | signal_render)
+fi
 [ -z "$recent" ] && recent="(no assistant text yet)"
 
 # Workspace identity (M1). Empty cwd → skip, nothing to anchor against.
