@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # locals used by eval-driven asserts
 # tests/test_e2e.sh — full snapshot → resume round-trip without Claude
 # Code in the loop. Builds a synthetic JSONL transcript, runs the
 # snapshot script over it, then runs the resume script and verifies the

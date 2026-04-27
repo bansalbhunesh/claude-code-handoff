@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # locals used by eval-driven asserts
 # tests/test_resume.sh — exercises scripts/handoff-resume.sh.
 #
 # Implementation note: the resume script reads JSON on stdin and emits

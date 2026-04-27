@@ -1,0 +1,27 @@
+# Repo-wide shellcheck configuration.
+# Disabled checks are deliberate stylistic / semantic choices, not bugs.
+
+# SC1091: "Not following: foo.sh was not specified as input."
+# We source tests/lib.sh from each test file. shellcheck doesn't follow
+# the include in our setup; tests run fine. Could fix with `shellcheck -x`
+# but that complicates CI invocation for no benefit.
+disable=SC1091
+
+# SC2012: "Use find instead of ls to better handle non-alphanumeric filenames."
+# Session ids are UUID-shaped (regex-validated to [A-Za-z0-9._-]), so
+# ls's filename-handling caveats don't apply. ls -t is also more
+# portable for mtime-sorted listing across BSD and GNU.
+disable=SC2012
+
+# SC2016: "Expressions don't expand in single quotes, use double quotes for that."
+# Intentional in two places:
+#   1. install.sh's snap_cmd / resume_cmd — Claude Code's hook runner
+#      expands $HOME at hook execution time; we want the literal string
+#      in settings.json.
+#   2. tests/*.sh's `assert '<cond>'` calls — the assert helper uses
+#      `eval` so the condition string MUST be unexpanded at the call site.
+disable=SC2016
+
+# SC2329: "This function is never invoked."
+# False positives in tests/lib.sh (functions invoked via `run`).
+disable=SC2329

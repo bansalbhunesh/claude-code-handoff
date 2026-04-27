@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # locals used by eval-driven asserts
 # tests/test_cli.sh — exercise the bin/claude-handoff CLI end-to-end.
 
 # shellcheck source=lib.sh

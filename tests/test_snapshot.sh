@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # locals used by eval-driven asserts
 # tests/test_snapshot.sh — exercises scripts/handoff-snapshot.sh.
 # Each test isolates itself with a fresh HOME under mktemp -d so we
 # never touch the real ~/.claude.

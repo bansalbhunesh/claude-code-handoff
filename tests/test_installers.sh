@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # locals used by eval-driven asserts
 # tests/test_installers.sh — exercises install.sh and uninstall.sh.
 # All tests use CLAUDE_HOME=$tmp so we never touch the real ~/.claude.
 

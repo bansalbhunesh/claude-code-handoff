@@ -24,8 +24,9 @@ file_mode() {
 
 # Human-readable age (e.g. "3d 4h").
 human_age() {
-  local now=$(date +%s)
-  local age=$((now - $1))
+  local now age
+  now=$(date +%s)
+  age=$((now - $1))
   local d=$((age / 86400))
   local h=$(((age % 86400) / 3600))
   local m=$(((age % 3600) / 60))
