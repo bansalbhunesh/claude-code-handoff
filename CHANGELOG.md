@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-27
+
+**M2: signal scoring.** Snapshots now triage assistant reasoning blocks through a heuristic relevance scorer. High-signal blocks (decisions, blockers, file references, goal-restates) land in the main `## Recent assistant reasoning` section; low-signal blocks (filler acks, short progress notes) drop into a collapsed `<details>` block at packet bottom — lossless by default.
+
+### Added
+- `lib/signal.sh` — heuristic scoring transform. Per-block rubric (sum of):
+  - +3 length > 200 chars
+  - +2 decision keywords (`decision|chose|going with|landed on|conclusion`)
+  - +2 blocker keywords (`blocked|broken|fails|error|can't|won't|doesn't work`)
+  - +2 goal-restate keywords (`goal|trying to|need to|so that|in order to`)
+  - +2 file/path mentions (`.ts|.js|.py|.go|...` or `(^|/)(src|lib|tests?|app|...)/`)
+  - −5 pure ack (`^(ok|okay|got it|sure|done|thanks?|yeah|yep|nope|cool|nice|alright)\b.{0,40}$`)
+  - −3 length < 80 AND no positive signals above
+- Mandatory keep-rules (override threshold): first goal-restate message, last 2 messages.
+- `claude-state signal <packet> [--explain] [--threshold N] [--raw]` — re-score an existing packet without re-snapshotting; useful for tuning `HANDOFF_SIGNAL_MIN` against your own corpus.
+- `HANDOFF_SIGNAL_MIN` env var — default 3. Set `0` (or any non-positive) as escape hatch to keep everything (filtering off).
+- `HANDOFF_SIGNAL_DETAILS` env var — default 1. Set `0` to suppress the lossless `<details>` block on dropped reasoning.
+- `tests/test_signal.sh` — 16 cases covering rubric (ack drops, single-decision below threshold, decision+blocker keeps, long-prose keeps, first-goal mandatory, last-2 mandatory, threshold-0 escape hatch), CLI (`--explain` per-block table, `--threshold` override, invalid args rejected, session-id resolution), and snapshot integration (filtered reasoning, `<details>` on/off, `HANDOFF_SIGNAL_MIN=0` keeps all in main).
+
+### Changed
+- `modules/handoff/snapshot.sh` widens its capture window for assistant text from the last 5 blocks to the last 20, then runs them through the signal filter. The kept set lands in the main reasoning section; the rest goes into the `<details>` block. Net result for a typical session: shorter top-of-packet reasoning section with the high-signal points front-and-center, but no information loss.
+- `bin/claude-state` adds `signal` subcommand dispatch and updates the help text.
+- `install.sh` installs `lib/signal.sh` and `modules/signal/signal.sh`.
+
+### Tests
+- 99 → 115. New `test_signal.sh` (16). All existing tests still pass.
+
 ## [0.4.0] - 2026-04-27
 
 **Project renamed from `claude-code-handoff` to `claude-state`.** The scope outgrew "handoff" — v0.4 adds workspaces, and v0.5 + v0.6 will add signal scoring and structured memory ([PLAN.md](PLAN.md)). `claude-handoff` is kept as a deprecation shim that forwards to `claude-state` and prints a one-line warning; it will be removed in v0.6. See [MIGRATION.md](MIGRATION.md) for the upgrade path.
@@ -83,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Goal extractor using JSONL `isCompactSummary` / `isMeta` flags + array-shape user content support.
 - Security hardening: `umask 077`, `chmod 700` on handoff dir, `chmod 600` on packets, symlink protection, session-id regex.
 
+[0.5.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.5.0
 [0.4.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.4.0
 [0.3.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.3.0
 [0.2.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.2.0

@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
-[![Tests: 78/78](https://img.shields.io/badge/tests-78%2F78-brightgreen.svg)](tests/)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Tests: 115/115](https://img.shields.io/badge/tests-115%2F115-brightgreen.svg)](tests/)
 
 > **Claude Code forgets. This plugin remembers — and now knows which project to remember it for.**
 >
@@ -153,6 +153,7 @@ claude-state status
 | `claude-state edit <session-id>` | Open a packet in `$EDITOR` to redact secrets without losing the rest |
 | `claude-state status` | Install state, mode, jq version, packet count |
 | `claude-state path` | Print the handoff directory path |
+| `claude-state signal <packet> [--explain] [--threshold N] [--raw]` | Re-score a packet's reasoning section |
 | `claude-state prune --older-than 30d` | Delete packets older than 30 days (interactive) |
 | `claude-state prune --keep 20` | Keep 20 most recent, delete the rest (interactive) |
 | `claude-state help` | Show usage |
@@ -206,6 +207,67 @@ Packets:
 ### Smart `claude-state resume`
 
 The new `resume` subcommand is workspace-aware:
+
+(continued — Smart resume table follows below; before that, here's signal scoring from v0.5.)
+
+---
+
+## Signal scoring (v0.5)
+
+Snapshots run assistant reasoning blocks through a relevance scorer at write time. High-signal content (decisions, blockers, file references, goal restates) stays in the main `## Recent assistant reasoning` section; low-signal content (filler acks, very short progress notes) drops into a collapsed `<details>` block at packet bottom — **lossless by default**, just out of the way.
+
+```
+## Recent assistant reasoning
+blocked: tests fail because the snapshot script can't find lib/common.sh in modules/
+
+---
+
+Plan: scaffold modules/signal/, then write tests in tests/test_signal.sh. Goal: ship v0.5.
+
+<details>
+<summary>2 low-signal block(s) dropped (signal threshold 3)</summary>
+
+**[score -8, ack_only+too_short_no_signal]**
+
+ok thanks
+
+---
+
+**[score 2, decision]**
+
+I went with rebase merge as the conclusion. The repo prefers linear history.
+
+</details>
+```
+
+Tune the threshold against your own corpus without re-snapshotting:
+
+```bash
+$ claude-state signal <session-id> --explain --threshold 0
+threshold=0   kept=5   dropped=0   total=5
+[+] 0    score=-8    ack_only+too_short  ok thanks
+[+] 1    score=2     decision            I went with rebase merge ...
+[+] 2    score=4     blocker+file_ref    blocked: tests fail because ...
+[+] 3    score=4     first_goal          Plan: scaffold modules/signal/ ...
+[+] 4    score=-3    last_2              wrapping up the work
+```
+
+| Subcommand / flag | Effect |
+|---|---|
+| `claude-state signal <packet>` | Re-render kept body + `<details>` block (default threshold 3). |
+| `claude-state signal <packet> --explain` | Per-block table: `[+]` kept / `[-]` dropped, score, reason, first 60 chars. |
+| `claude-state signal <packet> --threshold N` | Override threshold for this invocation. `N=0` is the escape hatch (keep everything). |
+| `claude-state signal <packet> --raw` | Emit the unfiltered block list (for piping). |
+| `HANDOFF_SIGNAL_MIN=N` env | Default threshold for snapshot-time filtering (default `3`). |
+| `HANDOFF_SIGNAL_DETAILS=0` env | Suppress the lossless `<details>` block (kept-only output). |
+
+**Mandatory keeps** (override threshold, including `--threshold 0`): the first message containing goal-restate keywords; the last 2 messages (recency safety net).
+
+**Heuristic, not LLM-based.** Hooks must stay sync, fast, no network. A future `claude-state signal --rescore --llm` could be a separate, opt-in offline step (out of scope for v0.5).
+
+---
+
+### Original smart resume table (v0.4)
 
 | Invocation | Picks |
 |---|---|
