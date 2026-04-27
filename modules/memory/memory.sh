@@ -180,7 +180,7 @@ cmd_add() {
   created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   created_session="${HANDOFF_SESSION_ID:-}"
   if [ -z "$created_session" ] && [ -f "$(cs_handoff_dir)/.last_session" ]; then
-    created_session=$(cat "$(cs_handoff_dir)/.last_session" 2>/dev/null | head -1)
+    created_session=$(head -1 "$(cs_handoff_dir)/.last_session" 2>/dev/null)
   fi
 
   printf '%s' "$body" | memory_write "$f" "$type" "$description" "$state" "$created" "$created_session" ""
