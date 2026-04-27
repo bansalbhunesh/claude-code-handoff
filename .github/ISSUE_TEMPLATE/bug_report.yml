@@ -1,0 +1,83 @@
+name: Bug report
+description: Something isn't working as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Filling this out completely helps me reproduce and fix faster.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the unexpected behavior.
+      placeholder: I expected X, but Y happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Minimal sequence of commands to reproduce the bug. If it involves
+        a specific transcript or settings.json shape, paste it (redacted).
+      placeholder: |
+        1. ./install.sh
+        2. /compact in a session with X
+        3. claude-handoff list shows...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: Output of `claude-handoff status` (the `version (cli)` line).
+      placeholder: "0.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux (Ubuntu)
+        - Linux (other)
+        - Windows / Git Bash
+        - Windows / WSL
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: jq-version
+    attributes:
+      label: jq version
+      description: Output of `jq --version`.
+      placeholder: "jq-1.7.1"
+
+  - type: input
+    id: claude-code-version
+    attributes:
+      label: Claude Code version
+      description: From the Claude Code app or `claude --version`.
+
+  - type: textarea
+    id: status-output
+    attributes:
+      label: claude-handoff status output
+      description: |
+        Paste the full output of `claude-handoff status`. This shows hook
+        wiring, mode, and packet count — usually the first thing I'd ask for.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, related issues, anything else relevant.

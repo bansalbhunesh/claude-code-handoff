@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/bansalbhunesh/claude-code-handoff/discussions
+    about: Open-ended questions or design discussions belong in Discussions.

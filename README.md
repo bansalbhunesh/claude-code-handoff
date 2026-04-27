@@ -405,15 +405,15 @@ Strips only entries pointing at our scripts (`handoff-snapshot.sh` and `handoff-
 
 ## Tested
 
-49 integration tests across 5 suites:
+62 integration tests across 5 suites:
 
 | Suite | Tests | What it covers |
 |---|---|---|
-| `test_snapshot.sh` | 11 | Empty / binary / symlinked / malformed transcripts; mode bits; regex rejection |
+| `test_snapshot.sh` | 15 | Empty / binary / symlinked / malformed transcripts; mode bits; regex rejection; `CLAUDE_HOME` override; `HANDOFF_KEEP_N` prune; `HANDOFF_DEBUG` log |
 | `test_resume.sh` | 11 | UTF-8 boundary truncation; symlink refusal; valid JSON shape; payload validation |
 | `test_installers.sh` | 12 | Fresh install, mode toggling, third-party hook coexistence, malformed settings |
 | `test_e2e.sh` | 1 | Full snapshot → resume round trip |
-| `test_cli.sh` | 14 | Every CLI subcommand including prune confirm/abort flows |
+| `test_cli.sh` | 23 | Every CLI subcommand including search, chain, edit, prune confirm/abort flows |
 
 Run them all:
 
@@ -421,7 +421,7 @@ Run them all:
 bash tests/run-all.sh
 ```
 
-Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on `macos-latest` and `ubuntu-latest` via [GitHub Actions](.github/workflows/ci.yml) on every push and PR.
+Expected output ends with `62 tests, 62 pass, 0 fail`. CI runs the same suite on `macos-latest` and `ubuntu-latest` via [GitHub Actions](.github/workflows/ci.yml) on every push and PR.
 
 ---
 
@@ -435,24 +435,30 @@ Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on
 
 ---
 
+## Project meta
+
+- **[Changelog](CHANGELOG.md)** — versioned history (current: v0.3.0)
+- **[Contributing](CONTRIBUTING.md)** — how to file issues, run tests, submit PRs
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** — Contributor Covenant 2.1
+
 ## Contributing
 
-Issues and PRs welcome. Useful contributions:
+Issues and PRs welcome. **Read [CONTRIBUTING.md](CONTRIBUTING.md) first** — it covers the dev setup, test workflow, code style, and PR checklist.
 
-- **Failure cases** — paste a redacted packet and explain what should have appeared. Even one example is enough to derive a regression test.
-- **Cross-platform fixes** — particularly Linux quirks (`stat`, `find`, `date`) and Windows / Git Bash edge cases we missed.
-- **Better goal extraction** — heuristics that work on transcript shapes we haven't seen.
-
-Before submitting a PR:
+Quick path:
 
 ```bash
-bash tests/run-all.sh         # all 49 should pass
-shellcheck install.sh uninstall.sh scripts/*.sh tests/*.sh bin/claude-handoff
+git clone https://github.com/bansalbhunesh/claude-code-handoff.git
+cd claude-code-handoff
+bash tests/run-all.sh         # all 62 should pass
 ```
 
-CI runs the same checks on Linux and macOS. Green locally usually means green in CI.
+If you find a bug, the [issue templates](.github/ISSUE_TEMPLATE/) ask the right 30-second-form questions; please use them.
 
----
+## Acknowledgments
+
+- The [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) repo, both for the project's existence (proof Claude Code skills can be small and useful) and for showing what an OSS README that *enjoys itself* looks like.
+- Anthropic's [Claude Code hooks documentation](https://code.claude.com/docs/en/hooks) — the lifecycle events this plugin builds on.
 
 ## License
 

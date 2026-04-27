@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement or new behavior
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the user-facing pain or workflow gap. The "why" matters more
+        than the "what" — concrete user scenarios help me design the right
+        thing rather than the most obvious thing.
+      placeholder: When my session ends and I come back hours later, I...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (if you have one)
+      description: |
+        Optional. If you've already thought about an approach, share it.
+        If not, leave blank and I'll propose something based on the problem.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: |
+        Workarounds, other tools, or different feature shapes you considered.
+        Helps me understand the design space.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: This plugin has an intentionally narrow scope.
+      options:
+        - label: My request fits within "snapshot session state on lifecycle events and resume from it"
+        - label: My request doesn't add network calls or heavy dependencies (Node/Python/Go)
