@@ -3,26 +3,26 @@
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Tests: 49/49](https://img.shields.io/badge/tests-49%2F49-brightgreen.svg)](tests/)
 
-> **Don't lose your work when Claude Code compacts.**
-> Snapshot your session state to a structured "handoff packet" the next session can resume from — automatically or with a single `/resume` command.
+> **Claude Code forgets. This plugin remembers.**
+>
+> Long sessions hit context limits. Claude compacts. The summary it leaves behind keeps the shape but loses the texture — the dead ends, the decisions, the half-finished thought you cared about.
+>
+> `claude-code-handoff` writes a small structured note right before that happens, and lets the next session pick up from it. So the next time you say "where were we?" — the answer is right there.
 
 ---
 
-## The problem
+## The 60-second pitch
 
-Claude Code auto-compacts when the conversation runs out of context. The summary it generates keeps a high-level shape, but it loses **the texture you actually care about**:
+| Without this plugin | With this plugin |
+|---|---|
+| Long session → compaction → summary survives, **details die** | PreCompact hook writes a `handoff/<session>.md` snapshot first |
+| New session: "I have no idea what we were doing" | New session: `/resume` (or auto) → "Resuming X. Done A, B. Last decision: Y." |
+| `/clear` = total amnesia | SessionEnd hook captures even `/clear` exits |
+| Lost context = re-explore + re-explain | Pick up where you left off, ~5 seconds |
 
-- The decisions you ruled out (and why)
-- The dead ends you already tried
-- The specific reasoning behind in-flight work
-- What file the assistant was about to edit when context ran out
-
-If a session crashes, or you `/clear` to start fresh, the loss is **total** — the new session has no idea what happened before.
-
-`claude-code-handoff` fixes this by hooking into Claude Code's lifecycle events. Right before compaction or session end, it writes a small structured markdown file capturing the goal, the plan, the recent decisions, the files touched, and the prior session id (so chains are walkable). A `/resume` slash command — or an opt-in `SessionStart` hook — loads that packet back into the next session.
-
-No background daemon. No code change. Pure bash + jq, ~250 lines of plugin code, one command to install, one command to remove.
+No daemon. No code change. ~250 lines of bash + jq, one install, one uninstall. Plays nice with any other hooks you already have.
 
 ---
 
@@ -34,21 +34,25 @@ cd claude-code-handoff
 ./install.sh
 ```
 
-That's it. The next time a session compacts (or you type `/compact`), a packet appears in `~/.claude/handoff/`. To pick up where you left off in a new session:
+That's it. Compaction now leaves a packet behind. Resume with:
 
 ```
 /resume
 ```
 
-Claude reads the most recent packet and gives you a 4–6 line summary, then waits for your direction.
+Want it fully automatic (no typing `/resume`)?
 
-> **Want it fully automatic?** Run `./install.sh --auto` instead. A `SessionStart` hook will inject the packet on every post-compaction or resumed session, no `/resume` typing required. (Opt-in because some of the underlying mechanism is undocumented — see [Limitations](#limitations).)
+```bash
+./install.sh --auto
+```
+
+A `SessionStart` hook will inject the packet on every post-compaction or resumed session. Opt-in because some of the underlying mechanism is undocumented — see [Limitations](#limitations).
 
 ---
 
 ## What a packet looks like
 
-A real packet from a session — markdown, human-readable, ~1–2 KB:
+A real packet from a real session — markdown, human-readable, ~1–2 KB:
 
 ```markdown
 # Handoff packet
@@ -56,7 +60,7 @@ A real packet from a session — markdown, human-readable, ~1–2 KB:
 - event: PreCompact
 - generated: 2026-04-26T23:16:48Z
 - cwd: /Users/ankur
-- continues_from: 7c2db8e1-...   # only present if this is a chained session
+- continues_from: 7c2db8e1-...   # only set if this is a chained session
 
 ## Original goal
 build a /handoff slash command + PreCompact hook
@@ -85,32 +89,34 @@ Next: confirm /resume can read it from a fresh session before adding the
 auto-resume `SessionStart` hook.
 ```
 
+That's the whole format. Pure markdown. You can `cat`, `grep`, `vim`, or feed it to anything.
+
 ---
 
 ## Two ways to resume
 
-| | Manual mode (default) | Auto-resume mode (`--auto`) |
+| | **Manual** (default) | **Auto-resume** (`--auto`) |
 |---|---|---|
-| **How** | Type `/resume` in a new session | New session loads the packet automatically |
-| **Triggered by** | You | `SessionStart` hook with `compact` / `resume` matchers |
-| **Permission prompt on first use?** | One-time `Bash` approval (pre-approved by the slash command's `allowed-tools`) | None |
-| **Stability** | Documented and stable | Relies on `SessionStart`'s `additionalContext` injection (works today, but the size limit and presentation-to-model behavior are undocumented) |
-| **Recommended for** | First-time users, low-trust environments | Power users, after you've confirmed manual mode works |
+| **How** | Type `/resume` in a new session | New session auto-loads packet |
+| **Triggered by** | You | `SessionStart` hook (`compact` / `resume` matchers) |
+| **Permission prompt on first use** | Pre-approved by `allowed-tools` frontmatter — none | None |
+| **Stability** | Documented and stable | Relies on `SessionStart`'s `additionalContext` injection (works today, undocumented size limits) |
+| **Best for** | First-time users, low-trust environments | Power users who've confirmed manual mode works |
 
-Switching modes:
+Switching modes is one command, both directions:
 
 ```bash
 ./install.sh --auto    # turn on auto-resume
 ./install.sh           # turn off auto-resume (re-running without --auto strips it)
 ```
 
-Toggling works in both directions. Third-party `SessionStart` hooks (from other plugins) are preserved across toggles.
+Third-party `SessionStart` hooks (from other plugins) are preserved across toggles.
 
 ---
 
-## Daily use — the `claude-handoff` CLI
+## Daily use — `claude-handoff` CLI
 
-`bin/claude-handoff` is installed to `~/.claude/bin/`. Add that to your `$PATH` (or invoke by full path).
+`bin/claude-handoff` is installed to `~/.claude/bin/`. Add that to your `$PATH`, or invoke by full path.
 
 ```text
 $ claude-handoff list
@@ -190,7 +196,7 @@ flowchart TB
     RSM --> S2
 ```
 
-When does each piece fire? Here's the time-ordered story of one round trip:
+Time-ordered version of the same story:
 
 ```mermaid
 sequenceDiagram
@@ -223,7 +229,7 @@ sequenceDiagram
     end
 ```
 
-Five hook events get wired:
+The five hook entries the installer wires up:
 
 | Event | Matcher | Mode | Script | Fires when |
 |---|---|---|---|---|
@@ -233,19 +239,42 @@ Five hook events get wired:
 | `SessionStart` | `compact` | `--auto` only | `handoff-resume.sh` | When a fresh session begins after compaction |
 | `SessionStart` | `resume` | `--auto` only | `handoff-resume.sh` | When a session is resumed (`claude --resume`) |
 
-`handoff-snapshot.sh` reads the session transcript JSONL, parses out the goal / todos / task tracker / edited files / recent reasoning, and writes a markdown packet. Always exits 0 — never blocks the underlying event.
+`handoff-snapshot.sh` reads the session transcript JSONL, parses out goal / todos / task tracker / edited files / recent reasoning, and writes a markdown packet. **Always exits 0** — never blocks the underlying event.
 
-`handoff-resume.sh` finds the most relevant packet (matching `session_id` first, then most recently modified), caps it at 16,000 codepoints (UTF-8-safe), and emits the documented `hookSpecificOutput.additionalContext` JSON shape that Claude Code uses to inject context into a fresh session.
+`handoff-resume.sh` finds the most relevant packet (matching `session_id` first, then most recently modified), caps it at 16,000 codepoints (UTF-8-safe), and emits the documented `hookSpecificOutput.additionalContext` JSON shape Claude Code uses to inject context.
+
+---
+
+## Platforms
+
+| Platform | Status | Notes |
+|---|---|---|
+| **macOS** | Fully supported | Tested locally + CI on `macos-latest` |
+| **Linux** | Fully supported | CI runs on `ubuntu-latest` every push |
+| **Windows / Git Bash** | Should work | Claude Code uses Git Bash on Windows natively (since 2025); same shell, same scripts. **Caveat:** NTFS doesn't enforce POSIX file modes — `chmod 600` / `chmod 700` are advisory there |
+| **Windows / WSL** | Works like Linux | Recommended over Git Bash for proper file-mode enforcement |
+| **Windows / native PowerShell** | Not supported | Scripts are bash. A PowerShell port is on the roadmap if there's demand — open an issue |
+
+CI matrix runs both `ubuntu-latest` and `macos-latest`; Windows is intentionally not in CI yet because the official runners require some Git-Bash-specific path handling that hasn't been validated.
 
 ---
 
 ## Requirements
 
-- **Claude Code** (CLI)
-- **`bash`** 3.2 or newer (macOS default works)
-- **`jq`** ≥ 1.6 (we use the `//=` operator). On macOS: `brew install jq`. On recent Linux distros: `apt-get install jq` or your package manager.
+- **Claude Code** (CLI) — any recent version with hooks support
+- **`bash`** 3.2 or newer (macOS default works; Git Bash on Windows works)
+- **`jq`** ≥ 1.6 (we use the `//=` operator)
 
-The plugin makes no network calls, has no dependencies beyond bash + jq + standard POSIX tools (`find`, `stat`, `mv`, `mktemp`, `date`).
+| OS | Install jq |
+|---|---|
+| macOS | `brew install jq` |
+| Debian / Ubuntu | `sudo apt-get install jq` |
+| Fedora / RHEL | `sudo dnf install jq` |
+| Windows (Git Bash) | scoop / choco / static binary |
+| Windows (WSL) | use the Linux command for your distro |
+| anywhere | static binary at <https://jqlang.github.io/jq/download/> |
+
+The plugin makes no network calls. No dependencies beyond bash + jq + standard POSIX tools (`find`, `stat`, `mv`, `mktemp`, `date`).
 
 ---
 
@@ -253,19 +282,48 @@ The plugin makes no network calls, has no dependencies beyond bash + jq + standa
 
 Handoff packets capture **verbatim user prompts and assistant prose** — including anything you pasted into the conversation (API keys, `.env` content, passwords, tokens) and anything the assistant repeated back in its replies. Packets sit on disk under `~/.claude/handoff/` until you delete them.
 
-What the plugin does:
+**What the plugin does:**
 
-- **Mode 700** on `~/.claude/handoff/` (owner-only access)
+- **Mode 700** on `~/.claude/handoff/` (owner-only access on Unix-y filesystems)
 - **Mode 600** on every newly-written packet
 - **Refuses to write** through a symlinked handoff directory or symlinked output path
 - **Validates `session_id`** with a regex before using it as a filename, blocking path-traversal
-- **Hooks always exit 0** — they never block compaction or session shutdown, but they also can't break your terminal
+- **Hooks always exit 0** — they never block compaction or session shutdown, but they also never break your terminal
 
-What you should do:
+**What you should do:**
 
-- **Don't paste secrets into the conversation** if you're not okay with them ending up in `~/.claude/handoff/`. If you do, run `./uninstall.sh --purge` (or `claude-handoff prune --keep 0`) to delete saved packets.
+- **Don't paste secrets into the conversation** if you're not comfortable with them ending up in `~/.claude/handoff/`. If you do, run `./uninstall.sh --purge` (or `claude-handoff prune --keep 0`) to delete saved packets.
 - Treat `~/.claude/handoff/` as sensitive — back it up only to encrypted destinations, never commit it.
-- The plugin does **no automatic rotation** — packets accumulate indefinitely. Sweep periodically with `claude-handoff prune --older-than 30d` or `find ~/.claude/handoff -mtime +30 -delete`.
+- The plugin does **no automatic rotation** — packets accumulate indefinitely. Sweep periodically: `claude-handoff prune --older-than 30d` or `find ~/.claude/handoff -mtime +30 -delete`.
+- **On Windows / Git Bash specifically:** NTFS doesn't enforce POSIX modes. The `chmod` calls succeed but the actual access control comes from Windows ACLs (which inherit from your user dir, so packets are still owner-private in practice). If you want hard-enforced POSIX permissions on Windows, run inside WSL2.
+
+---
+
+## FAQ
+
+**Does it slow down Claude Code?**
+No. The hook is a single bash invocation that reads the transcript and writes one file — typically <100ms even for hour-long sessions. Always exits 0, so even if it crashes it doesn't block the event.
+
+**Does it touch my code or send anything over the network?**
+No code changes. No network calls. The packet is local-only, owner-readable.
+
+**Will my packets pile up forever?**
+Yes, until you prune. Run `claude-handoff prune --older-than 30d` periodically or set up a cron. There's a roadmap item to make rotation built-in.
+
+**What if I have other tools that hook PreCompact / SessionEnd / SessionStart?**
+They keep working. The installer does a `jq` merge, not a clobber. Third-party hooks on the same matcher are preserved alongside ours; uninstall strips only entries pointing at our scripts.
+
+**Why is `Current todos` always empty?**
+Modern Claude Code uses `TaskCreate` / `TaskUpdate` instead of `TodoWrite`. The plugin captures both — the actually-useful section is `Task tracker`. The `TodoWrite` field stays for back-compat.
+
+**What's the difference between `/resume` and auto-resume?**
+Both load the same packet. `/resume` is a slash command you type; auto-resume is a `SessionStart` hook that injects automatically. Auto-resume relies on undocumented behavior (size limits, presentation to the model), so it's opt-in. Manual is recommended until you've confirmed it works for your setup.
+
+**Can I run this on a shared machine?**
+Yes, but each user gets their own `~/.claude/handoff/`. If you share `$HOME` (rare), the mode-700 directory stops other users from reading packets, but anyone with the same UID could.
+
+**What about Codex / Cursor / other AI coding tools?**
+Right now this is Claude-Code-specific because it depends on Claude Code's hook events (`PreCompact`, `SessionEnd`, `SessionStart`). If similar tools expose comparable hooks, a port would be small. PRs welcome.
 
 ---
 
@@ -273,10 +331,10 @@ What you should do:
 
 ### `/compact` runs but no packet appears
 
-Run `claude-handoff status`. If `PreCompact hook` shows `NOT WIRED`, the install didn't merge — re-run `./install.sh`.
+Run `claude-handoff status`. If `PreCompact hook` shows `NOT WIRED`, the install merge didn't take — re-run `./install.sh`.
 
 If it shows `wired` but a packet still doesn't appear:
-- The script always exits 0 (so nothing is logged on failure). Temporarily add `set -x` near the top of `~/.claude/scripts/handoff-snapshot.sh` and reproduce — you'll see what's failing in your shell's stderr.
+- Scripts always exit 0 (so nothing logs on failure). Temporarily add `set -x` near the top of `~/.claude/scripts/handoff-snapshot.sh` to see what's failing.
 - Check `jq` is on your `PATH` — the hook runner inherits a minimal env on some platforms.
 
 ### `/resume` doesn't appear in the slash menu
@@ -301,29 +359,25 @@ Some `SessionStart` injection behavior is undocumented. If `claude-handoff statu
 ./install.sh   # re-run without --auto
 ```
 
-You can still type `/resume` to load context manually.
+You can still type `/resume` to load context.
 
 ### `install.sh: jq >= 1.6 is required`
 
-Update jq:
+Update jq with the command for your OS in the [Requirements](#requirements) table.
 
-| OS | Command |
-|---|---|
-| macOS | `brew install jq` |
-| Debian/Ubuntu | `sudo apt-get install jq` |
-| Fedora/RHEL | `sudo dnf install jq` |
-| Windows (WSL) | use the Linux command for your distro |
-| anywhere | static binary at <https://jqlang.github.io/jq/download/> |
+### Windows: `chmod` warnings or odd permissions
+
+NTFS doesn't enforce POSIX modes the way macOS/Linux do. The chmod calls succeed; the *effective* access control comes from Windows ACLs. For hard-enforced POSIX permissions, use WSL2 with a Linux filesystem.
 
 ---
 
 ## Limitations
 
-- **`Current todos` is usually empty.** Modern Claude Code uses `TaskCreate` / `TaskUpdate` rather than `TodoWrite`. The actually-useful section is `Task tracker`.
-- **Auto-resume relies on undocumented behavior.** `SessionStart`'s `additionalContext` injection is documented; size limits, version-availability of the field, and presentation to the model are not. The plugin caps injection at 16,000 codepoints defensively.
-- **`SessionEnd` doesn't fire on hard kills.** Clean exits (`/clear`, logout, `Ctrl-C` to prompt) trigger it; SIGKILL or harness crashes don't, and lose the packet for that session.
-- **Each packet describes one session.** Older packets remain on disk under their own ids; chains link via `continues_from`, but `/resume` currently loads only one packet at a time.
-- **Goal heuristic is best-effort.** Filters out compact summaries (`isCompactSummary` flag), command meta (`isMeta` flag, plus `<` / `⏺` prefix fallback), empty messages, and assistant paste-backs. Slash-command-only sessions correctly report `(unknown)`.
+- **`Current todos` is usually empty.** Modern Claude Code uses `TaskCreate` / `TaskUpdate`. The actually-useful section is `Task tracker`.
+- **Auto-resume relies on undocumented behavior.** `SessionStart`'s `additionalContext` injection is documented; size limits, version-availability, and presentation to the model are not. Plugin caps injection at 16,000 codepoints defensively.
+- **`SessionEnd` doesn't fire on hard kills.** Clean exits (`/clear`, logout, `prompt_input_exit`) trigger it; SIGKILL or harness crashes don't, and the packet for that session is lost.
+- **Each packet describes one session.** Older packets remain on disk; chains link via `continues_from`, but `/resume` currently loads only one packet at a time.
+- **Goal heuristic is best-effort.** Filters out compact summaries (`isCompactSummary` flag), command meta (`isMeta` flag, plus `<` / `⏺` prefix fallback), and empty messages. Slash-command-only sessions correctly report `(unknown)`.
 
 ---
 
@@ -342,11 +396,13 @@ Strips only entries pointing at our scripts (`handoff-snapshot.sh` and `handoff-
 
 49 integration tests across 5 suites:
 
-- `test_snapshot.sh` — empty, binary, symlinked, malformed transcripts; mode bits; regex rejection
-- `test_resume.sh` — UTF-8 boundary truncation; symlink refusal; valid JSON shape; payload validation
-- `test_installers.sh` — fresh install, mode toggling, third-party hook coexistence, malformed settings
-- `test_e2e.sh` — full snapshot → resume round trip
-- `test_cli.sh` — every CLI subcommand including prune confirm/abort flows
+| Suite | Tests | What it covers |
+|---|---|---|
+| `test_snapshot.sh` | 11 | Empty / binary / symlinked / malformed transcripts; mode bits; regex rejection |
+| `test_resume.sh` | 11 | UTF-8 boundary truncation; symlink refusal; valid JSON shape; payload validation |
+| `test_installers.sh` | 12 | Fresh install, mode toggling, third-party hook coexistence, malformed settings |
+| `test_e2e.sh` | 1 | Full snapshot → resume round trip |
+| `test_cli.sh` | 14 | Every CLI subcommand including prune confirm/abort flows |
 
 Run them all:
 
@@ -354,7 +410,7 @@ Run them all:
 bash tests/run-all.sh
 ```
 
-Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on macOS and Ubuntu via [GitHub Actions](.github/workflows/ci.yml) on every push and PR.
+Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on `macos-latest` and `ubuntu-latest` via [GitHub Actions](.github/workflows/ci.yml) on every push and PR.
 
 ---
 
@@ -362,8 +418,9 @@ Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on
 
 - **Cross-session chain walking.** `continues_from` is captured today but `/resume` loads one packet at a time. Make `/resume` walk the chain (limited depth) and merge packets, so a session compacted multiple times can recover early-session decisions.
 - **Pre-compact size monitoring.** If a `context_used_pct` env var ever appears in the hook payload, fire snapshots earlier (e.g., 70% full) so packets don't always reflect the most-degraded state.
-- **Packet rotation built in.** Auto-prune older than N days at install time, configurable.
+- **Built-in packet rotation.** Auto-prune older than N days, configurable at install time.
 - **Empirical sizing for `additionalContext`.** Test what size injection actually makes it through and adjust the 16K-codepoint cap.
+- **Native Windows / PowerShell port.** If there's demand. Open an issue if you'd use it.
 
 ---
 
@@ -372,7 +429,7 @@ Expected output ends with `49 tests, 49 pass, 0 fail`. CI runs the same suite on
 Issues and PRs welcome. Useful contributions:
 
 - **Failure cases** — paste a redacted packet and explain what should have appeared. Even one example is enough to derive a regression test.
-- **Cross-platform fixes** — particularly Linux quirks (`stat`, `find`, `date`) we missed.
+- **Cross-platform fixes** — particularly Linux quirks (`stat`, `find`, `date`) and Windows / Git Bash edge cases we missed.
 - **Better goal extraction** — heuristics that work on transcript shapes we haven't seen.
 
 Before submitting a PR:
@@ -382,10 +439,14 @@ bash tests/run-all.sh         # all 49 should pass
 shellcheck install.sh uninstall.sh scripts/*.sh tests/*.sh bin/claude-handoff
 ```
 
-CI runs the same checks on Linux and macOS, so green locally usually means green in CI.
+CI runs the same checks on Linux and macOS. Green locally usually means green in CI.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+*Why use big context when small packet do trick.*
