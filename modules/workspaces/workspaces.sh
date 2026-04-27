@@ -22,10 +22,15 @@ handoff_dir=$(cs_handoff_dir)
 index_file="$handoff_dir/index.json"
 
 # Read a single frontmatter field from a packet. Returns empty if absent.
-# Field format: `- key: value` on its own line, anywhere in the file.
+# Field format: `- key: value` on its own line in the frontmatter block
+# (everything before the first blank line). Bounding the scan to the
+# frontmatter prevents body content from forging fields. Trims trailing
+# whitespace on values so two packets that disagree only on trailing
+# spaces don't split into separate index entries.
 packet_field() {
   local f="$1" key="$2"
   awk -v k="$key" '
+    /^$/ {exit}
     /^- / {
       line = $0
       sub(/^- /, "", line)
@@ -36,6 +41,7 @@ packet_field() {
       if (kk != k) next
       val = substr(line, kpos + 1)
       sub(/^ +/, "", val)
+      sub(/[ \t\r]+$/, "", val)
       print val
       exit
     }
@@ -125,20 +131,29 @@ cmd_list() {
     return 0
   fi
   printf '%-50s %7s  %s\n' "WORKSPACE" "PACKETS" "LAST SEEN"
+  # Use \x1F (Unit Separator) as the field separator. \t collapses
+  # adjacent tabs (read treats whitespace IFS as a run), which made the
+  # "alias is null" case shift root into the alias slot. \x01 (SOH) is
+  # silently not honored as IFS by bash 3.2 read on macOS — read returns
+  # the whole line in the first variable. \x1F is the right tool.
   jq -r '
     .workspaces
     | to_entries
     | sort_by(.value.last_seen)
     | reverse
     | .[]
-    | "\(.key)\t\(.value.packet_count)\t\(.value.last_seen)\t\(.value.alias // "")\t\(.value.root // "")"
+    | [.key, (.value.packet_count|tostring), .value.last_seen, (.value.alias // ""), (.value.root // "")]
+    | join("")
   ' "$index_file" \
-  | while IFS=$'\t' read -r ws cnt last alias_to root; do
+  | while IFS=$'\37' read -r ws cnt last alias_to root; do
       name="$ws"
       [ -n "$alias_to" ] && name="$ws ($alias_to)"
       printf '%-50s %7s  %s\n' "$name" "$cnt" "$last"
       [ -n "$root" ] && printf '%-50s %7s  %s\n' "  → $root" "" ""
     done
+  # Pipelines with `set -o pipefail` propagate the read loop's final
+  # exit status (1 — the loop exits when read hits EOF). Force success.
+  return 0
 }
 
 cmd_show() {
@@ -148,6 +163,18 @@ cmd_show() {
     return 2
   fi
   write_index >/dev/null || return 1
+  # Resolve aliases too: if `name` matches a workspace's alias, use the
+  # canonical id instead. Lets `claude-state ws show <alias>` work after
+  # a `rename`, which is the obvious user expectation.
+  local resolved
+  resolved=$(jq -r --arg n "$name" '
+    if .workspaces[$n] then $n
+    else (.workspaces | to_entries[] | select(.value.alias == $n) | .key) // empty
+    end
+  ' "$index_file" 2>/dev/null)
+  if [ -n "$resolved" ]; then
+    name="$resolved"
+  fi
   local exists
   exists=$(jq -r --arg w "$name" '.workspaces[$w] // empty | length' "$index_file" 2>/dev/null) || exists=""
   if [ -z "$exists" ]; then

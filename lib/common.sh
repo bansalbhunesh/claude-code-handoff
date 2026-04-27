@@ -23,11 +23,18 @@ file_mode() {
   stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
 }
 
-# Human-readable age, e.g. "3d 4h", "12h 5m", "47m".
+# Human-readable age, e.g. "3d 4h", "12h 5m", "47m". Defensively rejects
+# non-numeric or empty input (callers sometimes pass `$(file_mtime)` for a
+# missing file, which is empty); future timestamps clamp to "0m" rather
+# than rendering negative durations.
 human_age() {
-  local now age d h m
+  local arg="${1:-}" now age d h m
+  case "$arg" in
+    ''|*[!0-9-]*|-) printf '?' ; return 0 ;;
+  esac
   now=$(date +%s)
-  age=$((now - $1))
+  age=$((now - arg))
+  [ "$age" -lt 0 ] && age=0
   d=$((age / 86400))
   h=$(((age % 86400) / 3600))
   m=$(((age % 3600) / 60))
@@ -44,8 +51,11 @@ cs_claude_dir() {
 
 # Resolve the handoff data directory. Stays at ~/.claude/handoff/ for
 # back-compat with existing v0.3 packets — we never moved the data.
+# Strips trailing slashes from CLAUDE_HOME so callers don't get "//handoff".
 cs_handoff_dir() {
-  printf '%s/handoff' "$(cs_claude_dir)"
+  local d
+  d=$(cs_claude_dir)
+  printf '%s/handoff' "${d%/}"
 }
 
 # 8-character hex digest of stdin (sha256 truncated). Used for workspace ids.

@@ -59,9 +59,9 @@ cmd_list() {
     sid=$(basename "$f" .md)
     mtime=$(file_mtime "$f")
     age=$(human_age "$mtime")
-    if grep -q '^- continues_from:' "$f" 2>/dev/null; then
-      local prior
-      prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+    local prior
+    prior=$(awk '/^$/ {exit} /^- continues_from:/ {print $3; exit}' "$f")
+    if [ -n "$prior" ]; then
       header_extra="  ↳ continues from $prior"
     fi
     printf '%-40s  %8s ago%s\n' "$sid" "$age" "$header_extra"
@@ -139,7 +139,9 @@ walk_chain() {
   printf '\n──── %s ────\n' "$sid"
   cat "$f"
   local prior
-  prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+  # Bound to frontmatter (stop at first blank line) so a forged
+  # `- continues_from:` line in body content can't drive recursion.
+  prior=$(awk '/^$/ {exit} /^- continues_from:/ {print $3; exit}' "$f")
   if [ -n "$prior" ]; then
     walk_chain "$prior" $((depth + 1))
   fi
@@ -292,9 +294,11 @@ resume_pick_workspace() {
   local f packet_ws packet_cwd
   while IFS= read -r f; do
     [ -z "$f" ] && continue
-    packet_ws=$(awk '/^- workspace: / {print $3; exit}' "$f")
+    # Bound the awk scan to the frontmatter section (stop at first blank
+    # line) so body content can't forge a `- workspace:` line.
+    packet_ws=$(awk '/^$/ {exit} /^- workspace: / {print $3; exit}' "$f")
     if [ -z "$packet_ws" ]; then
-      packet_cwd=$(awk '/^- cwd: / {sub(/^- cwd: /, ""); print; exit}' "$f")
+      packet_cwd=$(awk '/^$/ {exit} /^- cwd: / {sub(/^- cwd: /, ""); print; exit}' "$f")
       if [ -n "$packet_cwd" ]; then
         packet_ws=$(workspace_id_for_cwd "$packet_cwd" 2>/dev/null) || packet_ws=""
       fi
@@ -315,6 +319,10 @@ resume_pick_keywords() {
   [ -n "$keywords" ] || return 1
   # shellcheck disable=SC2206  # intentional word splitting on keyword string
   local kws=( $keywords )
+  # Whitespace-only input word-splits to a zero-length array. Under
+  # bash 3.2 (macOS) `for kw in "${kws[@]}"` then errors with
+  # "kws[@]: unbound variable" because of `set -u`. Return early.
+  [ "${#kws[@]}" -gt 0 ] || return 1
   local f best_score=0 best_path="" score kw
   while IFS= read -r f; do
     [ -z "$f" ] && continue
@@ -387,6 +395,14 @@ USAGE
         fi
         ;;
       keywords)
+        # Reject empty/whitespace-only keywords with a usage error instead
+        # of a misleading "no packets matched keywords ''" message.
+        local _trimmed
+        _trimmed=$(printf '%s' "$keywords" | tr -d '[:space:]')
+        if [ -z "$_trimmed" ]; then
+          err "resume --keywords: argument is empty or whitespace-only"
+          return 2
+        fi
         target=$(resume_pick_keywords "$keywords") || target=""
         if [ -z "$target" ]; then
           err "resume: no packets matched keywords '$keywords'"
