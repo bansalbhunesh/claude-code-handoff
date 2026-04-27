@@ -65,7 +65,8 @@ mkdir -p \
   "$claude_dir/commands" \
   "$claude_dir/handoff" \
   "$claude_dir/claude-state/lib" \
-  "$claude_dir/claude-state/modules/handoff"
+  "$claude_dir/claude-state/modules/handoff" \
+  "$claude_dir/claude-state/modules/workspaces"
 chmod 700 "$claude_dir/handoff" 2>/dev/null || true
 
 # Use rm-then-cp so foreign-owned existing files don't fail under set -e.
@@ -76,12 +77,14 @@ install_file() {
   [ -n "$mode" ] && chmod "$mode" "$dst"
 }
 
-install_file "$repo_dir/lib/common.sh"                        "$claude_dir/claude-state/lib/common.sh"               644
-install_file "$repo_dir/modules/handoff/snapshot.sh"          "$claude_dir/claude-state/modules/handoff/snapshot.sh" 755
-install_file "$repo_dir/modules/handoff/resume.sh"            "$claude_dir/claude-state/modules/handoff/resume.sh"   755
-install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                         755
-install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                       755
-install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                       644
+install_file "$repo_dir/lib/common.sh"                        "$claude_dir/claude-state/lib/common.sh"                  644
+install_file "$repo_dir/lib/workspace.sh"                     "$claude_dir/claude-state/lib/workspace.sh"               644
+install_file "$repo_dir/modules/handoff/snapshot.sh"          "$claude_dir/claude-state/modules/handoff/snapshot.sh"    755
+install_file "$repo_dir/modules/handoff/resume.sh"            "$claude_dir/claude-state/modules/handoff/resume.sh"      755
+install_file "$repo_dir/modules/workspaces/workspaces.sh"     "$claude_dir/claude-state/modules/workspaces/workspaces.sh" 755
+install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                            755
+install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                          755
+install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                          644
 
 # Best-effort cleanup of v0.3 layout. We delete the script files only;
 # we leave $claude_dir/scripts/ in place if it still has unrelated files.
@@ -111,10 +114,26 @@ jq --arg snap "$snap_cmd" \
    --argjson auto "$auto" '
   def hook_entry($cmd): {type: "command", command: $cmd};
 
+  # Coalesce duplicate-matcher entries that may exist from prior hand-edits
+  # or earlier installer bugs. Group by matcher (treating absent as null),
+  # union their hooks, dedupe by command. After this, each list contains at
+  # most one entry per (matcher) key.
+  def coalesce_matchers:
+    group_by(.matcher // null)
+    | map(
+        if length > 1 then
+          {matcher: .[0].matcher,
+           hooks: ([.[] | (.hooks // [])] | add | unique_by(.command // ""))}
+          | (if .matcher == null then del(.matcher) else . end)
+        else
+          .[0]
+        end);
+
   # Drop any of OUR hook entries (old or new path) so the merge below
   # adds clean ones — covers both fresh install and v0.3 → v0.4 upgrade.
   def strip_ours(arr):
     arr
+    | coalesce_matchers
     | map(.hooks |= map(select((.command // "") | test($strip) | not)))
     | map(select((.hooks // []) | length > 0));
 
@@ -186,7 +205,11 @@ Verify:
   2. ls -t $claude_dir/handoff/   # newest packet on top
   3. In a fresh session, type /resume — Claude should summarize the packet.
 EOF
-[ "$auto" -eq 1 ] && cat <<EOF
+if [ "$auto" -eq 1 ]; then
+  cat <<EOF
   4. Auto-resume only: open a fresh session after compaction. Claude should
      reference the prior session's state without you typing /resume.
 EOF
+fi
+
+exit 0

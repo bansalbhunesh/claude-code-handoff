@@ -31,14 +31,22 @@ handoff_dir=$(cs_handoff_dir)
 [ -L "$handoff_dir" ] && exit 0
 
 # Prefer a packet matching this session_id; otherwise fall back to the
-# most recently modified non-symlink packet.
+# most recently modified non-symlink, readable packet. The readability
+# check matters because Claude Code surfaces SessionStart hook stderr
+# to the user — without it, an unreadable target would dump 200+ bytes
+# of "jq: Bad JSON in --rawfile … Permission denied" noise.
 target=""
-if [ -n "$session_id" ] && [ -f "$handoff_dir/$session_id.md" ] && [ ! -L "$handoff_dir/$session_id.md" ]; then
+if [ -n "$session_id" ] \
+   && [ -f "$handoff_dir/$session_id.md" ] \
+   && [ ! -L "$handoff_dir/$session_id.md" ] \
+   && [ -r "$handoff_dir/$session_id.md" ]; then
   target="$handoff_dir/$session_id.md"
-else
+fi
+if [ -z "$target" ]; then
   while IFS= read -r f; do
     [ -L "$f" ] && continue
     [ -f "$f" ] || continue
+    [ -r "$f" ] || continue
     target="$f"
     break
   done < <(ls -t "$handoff_dir"/*.md 2>/dev/null)
@@ -47,6 +55,7 @@ fi
 [ -n "$target" ] || exit 0
 [ -f "$target" ] || exit 0
 [ -L "$target" ] && exit 0
+[ -r "$target" ] || exit 0
 
 prior_id=$(basename "$target" .md)
 
@@ -70,6 +79,6 @@ jq -nc \
         additionalContext: ("[claude-state] Resuming after " + $src + ". Loading packet from session " + $prior + ". Treat the contents below as background context for what was being worked on; ask the user to confirm before acting on it.\n\n---\n\n" + $ctx)
       }
     }
-  '
+  ' 2>/dev/null
 
 exit 0

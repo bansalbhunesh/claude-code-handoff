@@ -163,8 +163,11 @@ chmod 600 "$tmp" 2>/dev/null || true
 mv "$tmp" "$out"
 trap - EXIT
 
-# Optional auto-prune: keep only N newest packets.
-if [ -n "${HANDOFF_KEEP_N:-}" ] && [ "$HANDOFF_KEEP_N" -eq "$HANDOFF_KEEP_N" ] 2>/dev/null && [ "$HANDOFF_KEEP_N" -ge 0 ]; then
+# Optional auto-prune: keep only N newest packets. Treats 0 (and any
+# non-positive value) as "disabled" — KEEP_N=0 with the prior `-ge 0`
+# guard would have run `tail -n +1`, deleting the very packet just
+# written. Users who want zero packets should run `claude-state prune`.
+if [ -n "${HANDOFF_KEEP_N:-}" ] && [ "$HANDOFF_KEEP_N" -eq "$HANDOFF_KEEP_N" ] 2>/dev/null && [ "$HANDOFF_KEEP_N" -ge 1 ]; then
   ls -t "$handoff_dir"/*.md 2>/dev/null | tail -n +$((HANDOFF_KEEP_N + 1)) | while IFS= read -r victim; do
     [ -f "$victim" ] && rm -f "$victim"
   done
