@@ -6,10 +6,6 @@
 
 set -euo pipefail
 
-# Same MSYS path-translation defeat as install.sh — see comment there.
-export MSYS_NO_PATHCONV=1
-export MSYS2_ARG_CONV_EXCL='*'
-
 claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
 purge=0
 case "${1:-}" in
@@ -41,12 +37,14 @@ if [ -f "$settings" ]; then
   trap 'rm -f "$tmp"' EXIT
 
   # Strip any hook entry whose command path tail matches our v0.3 OR v0.4
-  # script filenames, anchored to a path-segment boundary so unrelated
-  # user scripts (e.g. /usr/local/my-handoff-snapshot.sh) survive.
+  # script filenames, anchored at start-of-string OR a path-segment
+  # boundary so unrelated user scripts (e.g. /usr/local/my-handoff-
+  # snapshot.sh) survive. (^|/) instead of / avoids MSYS path-conversion
+  # mangling the regex on Git Bash.
   jq '
     def strip(arr):
       arr
-      | map(.hooks |= map(select((.command // "") | test("/(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\\.sh$") | not)))
+      | map(.hooks |= map(select((.command // "") | test("(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\\.sh$") | not)))
       | map(select((.hooks // []) | length > 0));
 
     if (.hooks // null | type) != "object" then .hooks = {} else . end

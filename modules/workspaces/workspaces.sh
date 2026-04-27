@@ -144,6 +144,7 @@ cmd_list() {
     | .[]
     | (.key, (.value.packet_count|tostring), .value.last_seen, (.value.alias // ""), (.value.root // ""))
   ' "$index_file" \
+  | tr -d '\r' \
   | while IFS= read -r ws \
        && IFS= read -r cnt \
        && IFS= read -r last \

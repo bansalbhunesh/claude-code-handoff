@@ -11,15 +11,6 @@
 
 set -euo pipefail
 
-# Disable MSYS/MinGW automatic POSIX→Windows path translation on Git Bash.
-# Without this, the strip regex passed to jq via `--arg strip '/(...)'`
-# (which starts with `/`) is rewritten by MSYS as a Windows path like
-# `C:\Program Files\Git\(...)` — the regex no longer matches our hook
-# command tails, so v0.4 mode-toggle (auto→manual) fails to strip
-# SessionStart entries on Windows. No-op on Linux/macOS.
-export MSYS_NO_PATHCONV=1
-export MSYS2_ARG_CONV_EXCL='*'
-
 usage() {
   cat <<USAGE
 Usage: $0 [--auto] [-h|--help]
@@ -113,9 +104,13 @@ resume_cmd='$HOME/.claude/claude-state/modules/handoff/resume.sh'
 # Regex that matches BOTH the old v0.3 path tail and the new v0.4 path
 # tail. Used to strip stale entries before re-adding fresh ones, so an
 # upgrade picks up the new layout without leaving v0.3 hook strings behind.
-# Anchored at `/` so it can't match unrelated user scripts (e.g.
-# /usr/local/my-handoff-snapshot.sh) — same anchoring contract as v0.3.
-strip_pattern='/(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\.sh$'
+#
+# Anchor with `(^|/)` (start-of-string OR a path-segment boundary) so
+# unrelated user scripts (e.g. /usr/local/my-handoff-snapshot.sh) don't
+# match — same anchoring contract as v0.3. We avoid a leading `/` here
+# because Git Bash on Windows would otherwise translate the regex via
+# MSYS path conversion, mangling it before jq sees it.
+strip_pattern='(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\.sh$'
 
 jq --arg snap "$snap_cmd" \
    --arg resume "$resume_cmd" \
