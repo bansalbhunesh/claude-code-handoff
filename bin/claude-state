@@ -6,13 +6,28 @@
 
 set -uo pipefail
 
-CS_VERSION="0.4.0"
+CS_VERSION="0.6.1"
+
+# Resolve any symlink chain so the upward walk for lib/common.sh starts
+# from the script's REAL on-disk location, not the symlink path. This
+# matters for Homebrew installs, where bin/claude-state is a symlink
+# from /opt/homebrew/bin/ into /opt/homebrew/Cellar/.../libexec/bin/.
+# Without this, BASH_SOURCE[0] is the symlink path and the walk hits
+# /opt/homebrew/, /opt/, /, finding nothing.
+__cs_src="${BASH_SOURCE[0]}"
+while [ -L "$__cs_src" ]; do
+  __cs_link=$(readlink "$__cs_src")
+  case "$__cs_link" in
+    /*) __cs_src="$__cs_link" ;;
+    *)  __cs_src="$(cd "$(dirname "$__cs_src")" && pwd)/$__cs_link" ;;
+  esac
+done
 
 # Locate and source lib/common.sh. Walks upward and at each level checks
 # both `lib/common.sh` (repo: bin/ sibling to lib/) and
 # `claude-state/lib/common.sh` (installed: ~/.claude/bin/ above
 # ~/.claude/claude-state/lib/).
-__cs_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+__cs_dir=$(cd "$(dirname "$__cs_src")" && pwd)
 while [ "$__cs_dir" != "/" ]; do
   if [ -f "$__cs_dir/lib/common.sh" ]; then break; fi
   if [ -f "$__cs_dir/claude-state/lib/common.sh" ]; then

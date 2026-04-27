@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-28
+
+### Fixed
+- `bin/claude-state` resolves symlink chains before walking up for `lib/common.sh`. Without this, `BASH_SOURCE[0]` on macOS bash returned the symlink path (e.g. `/opt/homebrew/bin/claude-state` under Homebrew), causing the upward walk to fail to find the lib at the actual install location (`/opt/homebrew/Cellar/claude-state/0.6.1/libexec/lib/`). Surfaced when shipping the Homebrew tap (https://github.com/bansalbhunesh/homebrew-claude-state); didn't affect the `bash install.sh` path because that lays out the real CLI at `~/.claude/bin/claude-state` (no symlink).
+
 ## [0.6.0] - 2026-04-27
 
 **M3: structured memory.** A typed CLI layered on top of the harness's existing markdown memory store at `~/.claude/projects/<sanitized-cwd>/memory/`. Storage doesn't change — the harness keeps reading `MEMORY.md` like always — v0.6 adds state, links, and a versioned JSON plugin contract that other tools can call instead of parsing markdown.
@@ -157,6 +162,7 @@ Plugins should call this CLI instead of parsing markdown. Field additions are no
 - Goal extractor using JSONL `isCompactSummary` / `isMeta` flags + array-shape user content support.
 - Security hardening: `umask 077`, `chmod 700` on handoff dir, `chmod 600` on packets, symlink protection, session-id regex.
 
+[0.6.1]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.6.1
 [0.6.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.6.0
 [0.5.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.5.0
 [0.4.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.4.0
