@@ -5,13 +5,21 @@
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
 [![Tests: 133/133](https://img.shields.io/badge/tests-133%2F133-brightgreen.svg)](tests/)
 
-> **Claude Code forgets. This plugin remembers — and now knows which project to remember it for.**
->
-> Long sessions hit context limits. Claude compacts. The summary it leaves behind keeps the shape but loses the texture — the dead ends, the decisions, the half-finished thought you cared about.
->
-> `claude-state` writes a small structured note right before that happens, groups it by the project it came from, and lets the next session pick up from the right one. So the next time you say "where were we?" — the answer is for *this* project, not the last unrelated thing you were doing.
+> **Persistent state for Claude Code: snapshot every session before compaction, group packets by project, surface only the signal, and expose your auto-memory through a typed plugin contract.**
 
-> **Renamed in v0.4.0** (was `claude-code-handoff`). The `claude-state` deprecation shim keeps forwarding through one minor cycle. See [MIGRATION.md](MIGRATION.md) and [PLAN.md](PLAN.md) for what's coming next (signal scoring, structured memory).
+![demo](assets/demo.gif)
+
+```bash
+git clone https://github.com/bansalbhunesh/claude-code-handoff.git
+cd claude-code-handoff
+bash install.sh             # add --auto for SessionStart auto-resume
+```
+
+Then in any Claude Code session: `/resume`.
+
+> A Homebrew tap (`brew tap bansalbhunesh/claude-state && brew install claude-state`) is queued — see [#5](https://github.com/bansalbhunesh/claude-code-handoff/issues/5).
+
+> **Renamed in v0.4.0** (was `claude-code-handoff`). The `claude-handoff` deprecation shim keeps forwarding through one minor cycle. See [MIGRATION.md](MIGRATION.md) and [PLAN.md](PLAN.md).
 
 ---
 
@@ -29,6 +37,8 @@ No daemon. No code change. ~250 lines of bash + jq, one install, one uninstall. 
 ---
 
 ## Quick start
+
+The hero block above has the install — repeating it here for completeness:
 
 ```bash
 git clone https://github.com/bansalbhunesh/claude-code-handoff.git
