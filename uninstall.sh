@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.2.0 — uninstaller
+# claude-code-handoff v0.3.0 — uninstaller
 # Removes claude-code-handoff. Strips both manual-mode hooks
 # (PreCompact, SessionEnd → handoff-snapshot.sh) and auto-mode hooks
 # (SessionStart → handoff-resume.sh) from settings.json. Leaves the

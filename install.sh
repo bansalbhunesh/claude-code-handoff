@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.2.0 — installer
+# claude-code-handoff v0.3.0 — installer
 # Installs claude-code-handoff into ~/.claude/.
 # Idempotent: safe to run multiple times. Backs up settings.json on
 # successful merge. Pass --auto to also wire SessionStart auto-resume,

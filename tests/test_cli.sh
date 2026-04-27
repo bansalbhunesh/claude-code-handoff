@@ -140,6 +140,93 @@ t_prune_rejects_bad_args() {
   assert '[ "$ec" -eq 2 ]' "prune --older-than 7h (hours not supported) should exit 2 (got $ec)"
 }
 
+t_search_rejects_empty_query() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  CLAUDE_HOME="$tmp" "$CLI" search >/dev/null 2>&1
+  ec=$?
+  assert '[ "$ec" -eq 2 ]' "search without query should exit 2 (got $ec)"
+}
+
+t_search_finds_matches() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  echo "auth bug in middleware" > "$tmp/handoff/aaa.md"
+  echo "rendering issue in tabs" > "$tmp/handoff/bbb.md"
+  out=$(CLAUDE_HOME="$tmp" "$CLI" search auth 2>/dev/null)
+  assert 'echo "$out" | grep -q "aaa"' "search should locate the matching packet"
+  assert 'echo "$out" | grep -q "1 packet(s) matched"' "search should report match count"
+}
+
+t_search_no_matches() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  echo "nothing relevant" > "$tmp/handoff/aaa.md"
+  CLAUDE_HOME="$tmp" "$CLI" search xyzfoobar >/dev/null 2>&1
+  ec=$?
+  assert '[ "$ec" -eq 1 ]' "search with no matches should exit 1 (got $ec)"
+}
+
+t_chain_walks_continues_from() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  printf '# Handoff packet\n- session: aaa\n- continues_from: bbb\n## Original goal\nlatest\n' > "$tmp/handoff/aaa.md"
+  printf '# Handoff packet\n- session: bbb\n- continues_from: ccc\n## Original goal\nmiddle\n' > "$tmp/handoff/bbb.md"
+  printf '# Handoff packet\n- session: ccc\n## Original goal\nfirst\n' > "$tmp/handoff/ccc.md"
+  touch -t 202001010000 "$tmp/handoff/ccc.md"
+  touch -t 202101010000 "$tmp/handoff/bbb.md"
+  touch -t 202201010000 "$tmp/handoff/aaa.md"
+  out=$(CLAUDE_HOME="$tmp" "$CLI" chain 2>/dev/null)
+  assert 'echo "$out" | grep -q "session: aaa"' "chain should include latest packet"
+  assert 'echo "$out" | grep -q "session: bbb"' "chain should walk to bbb via continues_from"
+  assert 'echo "$out" | grep -q "session: ccc"' "chain should walk all the way to ccc"
+}
+
+t_chain_with_explicit_id() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  printf '# Handoff packet\n- session: aaa\n## Original goal\nstandalone\n' > "$tmp/handoff/aaa.md"
+  printf '# Handoff packet\n- session: bbb\n## Original goal\nother\n' > "$tmp/handoff/bbb.md"
+  out=$(CLAUDE_HOME="$tmp" "$CLI" chain bbb 2>/dev/null)
+  assert 'echo "$out" | grep -q "session: bbb"' "chain bbb should print bbb"
+  ! echo "$out" | grep -q "session: aaa" || exit 1
+}
+
+t_chain_missing_packet_handles_gracefully() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  printf '# Handoff packet\n- session: aaa\n- continues_from: ghost\n## Original goal\norphan\n' > "$tmp/handoff/aaa.md"
+  out=$(CLAUDE_HOME="$tmp" "$CLI" chain aaa 2>/dev/null)
+  assert 'echo "$out" | grep -q "ghost"' "chain should mention the missing parent id"
+  assert 'echo "$out" | grep -q "chain ends here"' "chain should indicate where it terminated"
+}
+
+t_edit_rejects_missing_arg() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  CLAUDE_HOME="$tmp" "$CLI" edit >/dev/null 2>&1
+  ec=$?
+  assert '[ "$ec" -eq 2 ]' "edit without id should exit 2 (got $ec)"
+}
+
+t_edit_invokes_editor() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  echo "# Packet" > "$tmp/handoff/aaa.md"
+  # Use `true` as an editor — no-ops, but exits 0.
+  EDITOR=true CLAUDE_HOME="$tmp" "$CLI" edit aaa >/dev/null 2>&1
+  ec=$?
+  assert '[ "$ec" -eq 0 ]' "edit with valid id and EDITOR=true should exit 0 (got $ec)"
+}
+
+t_edit_unknown_id_fails() {
+  tmp=$(tmpdir)
+  mkdir -p "$tmp/handoff"
+  CLAUDE_HOME="$tmp" "$CLI" edit nonexistent >/dev/null 2>&1
+  ec=$?
+  assert '[ "$ec" -ne 0 ]' "edit of unknown id should exit non-zero (got $ec)"
+}
+
 run "cli: help shows usage"            t_help_shows_usage
 run "cli: no-args exits 2"             t_no_args_exits_2
 run "cli: unknown command exits 2"     t_unknown_command_exits_2
@@ -154,6 +241,15 @@ run "cli: prune --keep no-op under"    t_prune_keep_no_op_when_under_limit
 run "cli: prune --keep deletes excess" t_prune_keep_deletes_excess
 run "cli: prune declined aborts"       t_prune_keep_aborts_on_n
 run "cli: prune rejects bad args"      t_prune_rejects_bad_args
+run "cli: search rejects empty query"  t_search_rejects_empty_query
+run "cli: search finds matches"        t_search_finds_matches
+run "cli: search no matches exits 1"   t_search_no_matches
+run "cli: chain walks continues_from"  t_chain_walks_continues_from
+run "cli: chain with explicit id"      t_chain_with_explicit_id
+run "cli: chain missing parent ok"     t_chain_missing_packet_handles_gracefully
+run "cli: edit rejects missing arg"    t_edit_rejects_missing_arg
+run "cli: edit invokes editor"         t_edit_invokes_editor
+run "cli: edit unknown id fails"       t_edit_unknown_id_fails
 
 printf '# pass=%d fail=%d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -5,7 +5,7 @@
 
 set -uo pipefail
 
-HANDOFF_VERSION="0.2.0"
+HANDOFF_VERSION="0.3.0"
 claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
 handoff_dir="$claude_dir/handoff"
 settings="$claude_dir/settings.json"
@@ -107,6 +107,76 @@ cmd_view() {
 
 cmd_path() {
   printf '%s\n' "$handoff_dir"
+}
+
+cmd_search() {
+  local query="${1:-}"
+  if [ -z "$query" ]; then
+    err "search: missing query (usage: claude-handoff search <pattern>)"
+    return 2
+  fi
+  [ -d "$handoff_dir" ] || { err "no handoff dir at $handoff_dir"; return 1; }
+  local hits=0 f sid mtime age
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if grep -i -q -- "$query" "$f" 2>/dev/null; then
+      sid=$(basename "$f" .md)
+      mtime=$(file_mtime "$f")
+      age=$(human_age "$mtime")
+      printf '\n=== %s  (%s ago) ===\n' "$sid" "$age"
+      grep -i -n --color=auto -B1 -A1 -- "$query" "$f" 2>/dev/null | head -20
+      hits=$((hits + 1))
+    fi
+  done < <(list_packets_by_mtime)
+  if [ "$hits" -eq 0 ]; then
+    echo "No matches for '$query'."
+    return 1
+  fi
+  printf '\n%d packet(s) matched.\n' "$hits"
+}
+
+# Recursively walk continues_from, bounded by max_depth, printing each
+# packet in the chain (newest first). Used by `chain`.
+walk_chain() {
+  local sid="$1" depth="$2" max_depth=10
+  [ "$depth" -ge "$max_depth" ] && { echo "(chain depth limit reached)"; return; }
+  local f="$handoff_dir/$sid.md"
+  if [ ! -f "$f" ]; then
+    echo "(packet $sid not found — chain ends here)"
+    return
+  fi
+  printf '\n──── %s ────\n' "$sid"
+  cat "$f"
+  local prior
+  prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+  if [ -n "$prior" ]; then
+    walk_chain "$prior" $((depth + 1))
+  fi
+}
+
+cmd_chain() {
+  local sid="${1:-}"
+  if [ -z "$sid" ]; then
+    sid=$(list_packets_by_mtime | head -1)
+    [ -z "$sid" ] && { err "no packets in $handoff_dir"; return 1; }
+    sid=$(basename "$sid" .md)
+  fi
+  walk_chain "$sid" 0
+}
+
+cmd_edit() {
+  local sid="${1:-}"
+  if [ -z "$sid" ]; then
+    err "edit: missing session id (usage: claude-handoff edit <session-id>)"
+    return 2
+  fi
+  local target="$handoff_dir/$sid.md"
+  if [ ! -f "$target" ]; then
+    err "no packet for session '$sid' at $target"
+    return 2
+  fi
+  local editor="${VISUAL:-${EDITOR:-vi}}"
+  "$editor" "$target"
 }
 
 cmd_status() {
@@ -215,6 +285,9 @@ Usage: claude-handoff <command> [args]
 Commands:
   list                       List packets, newest first.
   view [<session-id>]        View a packet (default: most recent).
+  search <pattern>           Find packets containing <pattern> (case-insensitive grep).
+  chain [<session-id>]       Walk the continues_from chain backwards (default: latest).
+  edit <session-id>          Open a packet in \$EDITOR for redaction.
   path                       Print the handoff directory path.
   status                     Show install state, mode, packet count.
   prune --older-than <N>d    Delete packets older than N days.
@@ -222,12 +295,19 @@ Commands:
   help                       Show this help.
 
 Environment:
-  CLAUDE_HOME    Override the default ~/.claude location.
+  CLAUDE_HOME       Override the default ~/.claude location.
+  HANDOFF_KEEP_N    When set on snapshot script (in your shell or hook
+                    env), keep only N newest packets after each write.
+  HANDOFF_DEBUG     When non-empty on the snapshot script, append a
+                    line per fire to ~/.claude/handoff/.log.
 
 Examples:
   claude-handoff list
   claude-handoff view
   claude-handoff view 300b907c-d452-4064-ac2c-ee2b9c98213f
+  claude-handoff search "auth bug"
+  claude-handoff chain
+  claude-handoff edit 300b907c-d452-4064-ac2c-ee2b9c98213f
   claude-handoff prune --older-than 30d
   claude-handoff prune --keep 20
 USAGE
@@ -238,6 +318,9 @@ USAGE
 case "${1:-}" in
   list)            shift; cmd_list "$@" ;;
   view)            shift; cmd_view "$@" ;;
+  search)          shift; cmd_search "$@" ;;
+  chain)           shift; cmd_chain "$@" ;;
+  edit)            shift; cmd_edit "$@" ;;
   path)            shift; cmd_path "$@" ;;
   status)          shift; cmd_status "$@" ;;
   prune)           shift; cmd_prune "$@" ;;

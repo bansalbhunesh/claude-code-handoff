@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.2.0 — resume
+# claude-code-handoff v0.3.0 — resume
 # Reads the most relevant handoff packet and emits it as additionalContext
 # for a fresh session via the documented SessionStart hookSpecificOutput
 # shape. Wired (opt-in) to SessionStart matchers `compact` and `resume`.
@@ -17,7 +17,8 @@ printf '%s' "$payload" | jq -e 'type=="object"' >/dev/null 2>&1 || exit 0
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)
 source_field=$(printf '%s' "$payload" | jq -r '.source // "unknown"' 2>/dev/null)
 
-handoff_dir="$HOME/.claude/handoff"
+claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
+handoff_dir="$claude_dir/handoff"
 [ -d "$handoff_dir" ] || exit 0
 # Refuse a symlinked handoff dir.
 [ -L "$handoff_dir" ] && exit 0

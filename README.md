@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
-[![Tests: 49/49](https://img.shields.io/badge/tests-49%2F49-brightgreen.svg)](tests/)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Tests: 62/62](https://img.shields.io/badge/tests-62%2F62-brightgreen.svg)](tests/)
 
 > **Claude Code forgets. This plugin remembers.**
 >
@@ -13,7 +13,7 @@
 
 ---
 
-## The 60-second pitch
+## Before vs after
 
 | Without this plugin | With this plugin |
 |---|---|
@@ -146,11 +146,22 @@ claude-code-handoff status
 | `claude-handoff list` | All packets, newest first, with relative ages |
 | `claude-handoff view` | Show the most recent packet |
 | `claude-handoff view <session-id>` | Show a specific packet |
+| `claude-handoff search <pattern>` | Case-insensitive grep across all packets, with surrounding context |
+| `claude-handoff chain [<session-id>]` | Walk `continues_from` links and print the full chain (default: latest) |
+| `claude-handoff edit <session-id>` | Open a packet in `$EDITOR` to redact secrets without losing the rest |
 | `claude-handoff status` | Install state, mode, jq version, packet count |
 | `claude-handoff path` | Print the handoff directory path |
 | `claude-handoff prune --older-than 30d` | Delete packets older than 30 days (interactive) |
 | `claude-handoff prune --keep 20` | Keep 20 most recent, delete the rest (interactive) |
 | `claude-handoff help` | Show usage |
+
+**Environment knobs** for the snapshot script (set in your shell or hook env):
+
+| Variable | Effect |
+|---|---|
+| `CLAUDE_HOME` | Override `~/.claude` (must match what `install.sh` was given) |
+| `HANDOFF_KEEP_N=20` | After each snapshot, keep only the 20 newest packets — built-in retention without cron |
+| `HANDOFF_DEBUG=1` | Append a one-line status to `~/.claude/handoff/.log` per hook fire (for troubleshooting silent hooks) |
 
 `prune` is **always interactive** — it lists what it will delete and asks before removing anything.
 

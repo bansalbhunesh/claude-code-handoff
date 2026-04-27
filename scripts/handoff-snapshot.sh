@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.2.0 — snapshot
+# claude-code-handoff v0.3.0 — snapshot
 # Snapshots conversation state to ~/.claude/handoff/<session_id>.md.
 # Wired to PreCompact (auto + manual) and SessionEnd. Always exits 0
 # so it never blocks the compaction or shutdown it's observing.
@@ -25,7 +25,8 @@ event=$(printf '%s' "$payload" | jq -r '.hook_event_name // "unknown"' 2>/dev/nu
 # can't produce surprising filenames. Real Claude Code uses UUIDs.
 [[ "$session_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 0
 
-handoff_dir="$HOME/.claude/handoff"
+claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
+handoff_dir="$claude_dir/handoff"
 # Refuse to write through a symlinked handoff directory — guards against
 # someone replacing it with a link to a sensitive path.
 [ -L "$handoff_dir" ] && exit 0
@@ -150,4 +151,24 @@ recent=$(jq -rs '
 chmod 600 "$tmp" 2>/dev/null || true
 mv "$tmp" "$out"
 trap - EXIT
+
+# Optional auto-prune: if HANDOFF_KEEP_N is a positive integer, keep
+# only that many newest packets. Lets users put retention into their
+# environment instead of running prune manually.
+if [ -n "${HANDOFF_KEEP_N:-}" ] && [ "$HANDOFF_KEEP_N" -eq "$HANDOFF_KEEP_N" ] 2>/dev/null && [ "$HANDOFF_KEEP_N" -ge 0 ]; then
+  ls -t "$handoff_dir"/*.md 2>/dev/null | tail -n +$((HANDOFF_KEEP_N + 1)) | while IFS= read -r victim; do
+    [ -f "$victim" ] && rm -f "$victim"
+  done
+fi
+
+# Optional debug log: if HANDOFF_DEBUG is non-empty, append a one-line
+# status record to ~/.claude/handoff/.log. Useful when hook firings
+# look invisible (since the script always exits 0 by design).
+if [ -n "${HANDOFF_DEBUG:-}" ]; then
+  bytes=$(wc -c <"$out" 2>/dev/null | tr -d ' ')
+  printf '%s  %-12s  session=%s  bytes=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$event" "$session_id" "$bytes" \
+    >> "$handoff_dir/.log" 2>/dev/null || true
+fi
+
 exit 0

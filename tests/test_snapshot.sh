@@ -168,6 +168,66 @@ test_empty_stdin_silent() {
   rm -f "$out"
 }
 
+test_claude_home_override() {
+  # When CLAUDE_HOME is set, the script must write to $CLAUDE_HOME/handoff,
+  # not to $HOME/.claude/handoff. This was a real bug found during the v0.2.0
+  # exploratory pass: install.sh honored CLAUDE_HOME but the runtime scripts
+  # didn't, so a non-default install location silently broke the round trip.
+  local home; home=$(tmpdir)
+  local cdir; cdir=$(tmpdir)
+  local tx="$home/tx.jsonl"
+  make_transcript "$tx"
+  jq -nc --arg sid "abc123" --arg tx "$tx" --arg cwd "$home" \
+    '{session_id:$sid, transcript_path:$tx, cwd:$cwd, hook_event_name:"PreCompact"}' \
+    | HOME="$home" CLAUDE_HOME="$cdir" bash "$SNAPSHOT"
+  assert '[ -f "$cdir/handoff/abc123.md" ]' \
+    "with CLAUDE_HOME=$cdir, packet should land at \$CLAUDE_HOME/handoff, not \$HOME/.claude/handoff"
+  assert '! [ -f "$home/.claude/handoff/abc123.md" ]' \
+    "with CLAUDE_HOME set, packet should NOT appear under \$HOME/.claude"
+}
+
+test_keep_n_prunes() {
+  local home; home=$(tmpdir)
+  local tx="$home/tx.jsonl"
+  make_transcript "$tx"
+  # Snapshot 5 packets with HANDOFF_KEEP_N=2; expect only the 2 newest to survive.
+  for i in 1 2 3 4 5; do
+    jq -nc --arg sid "k$i" --arg tx "$tx" --arg cwd "$home" \
+      '{session_id:$sid, transcript_path:$tx, cwd:$cwd, hook_event_name:"PreCompact"}' \
+      | HOME="$home" HANDOFF_KEEP_N=2 bash "$SNAPSHOT"
+    sleep 0.05
+  done
+  local count; count=$(ls "$home/.claude/handoff/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  assert '[ "$count" = "2" ]' "HANDOFF_KEEP_N=2 should leave 2 packets (got $count)"
+  assert '[ -f "$home/.claude/handoff/k5.md" ]' "newest packet (k5) should survive"
+  assert '[ -f "$home/.claude/handoff/k4.md" ]' "second-newest (k4) should survive"
+  assert '! [ -f "$home/.claude/handoff/k1.md" ]' "oldest (k1) should be deleted"
+}
+
+test_keep_n_invalid_is_noop() {
+  local home; home=$(tmpdir)
+  local tx="$home/tx.jsonl"
+  make_transcript "$tx"
+  jq -nc --arg sid "abc" --arg tx "$tx" --arg cwd "$home" \
+    '{session_id:$sid, transcript_path:$tx, cwd:$cwd, hook_event_name:"PreCompact"}' \
+    | HOME="$home" HANDOFF_KEEP_N="not-a-number" bash "$SNAPSHOT"
+  assert '[ -f "$home/.claude/handoff/abc.md" ]' \
+    "non-numeric HANDOFF_KEEP_N should be ignored, packet still created"
+}
+
+test_debug_log() {
+  local home; home=$(tmpdir)
+  local tx="$home/tx.jsonl"
+  make_transcript "$tx"
+  jq -nc --arg sid "dbg" --arg tx "$tx" --arg cwd "$home" \
+    '{session_id:$sid, transcript_path:$tx, cwd:$cwd, hook_event_name:"PreCompact"}' \
+    | HOME="$home" HANDOFF_DEBUG=1 bash "$SNAPSHOT"
+  local logf="$home/.claude/handoff/.log"
+  assert '[ -f "$logf" ]' "HANDOFF_DEBUG=1 should produce a .log file"
+  assert 'grep -q "session=dbg" "$logf"' ".log should contain a line for the session id"
+  assert 'grep -q "PreCompact" "$logf"' ".log should mention the hook event"
+}
+
 # --- driver ---
 
 run "snapshot: missing transcript"           test_missing_transcript
@@ -176,6 +236,10 @@ run "snapshot: binary transcript"            test_binary_transcript
 run "snapshot: rejects session_id '..'"      test_session_id_rejects_dotdot
 run "snapshot: rejects session_id '.bashrc'" test_session_id_rejects_dotfile
 run "snapshot: rejects session_id 'foo;rm'"  test_session_id_rejects_semicolon
+run "snapshot: CLAUDE_HOME override"         test_claude_home_override
+run "snapshot: HANDOFF_KEEP_N prunes"        test_keep_n_prunes
+run "snapshot: HANDOFF_KEEP_N invalid noop"  test_keep_n_invalid_is_noop
+run "snapshot: HANDOFF_DEBUG writes log"     test_debug_log
 run "snapshot: packet mode is 600"           test_packet_mode_600
 run "snapshot: handoff dir mode is 700"      test_handoff_dir_mode_700
 run "snapshot: symlinked handoff refused"    test_symlinked_handoff_dir_refused
