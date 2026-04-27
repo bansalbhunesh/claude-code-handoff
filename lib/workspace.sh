@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # lib/workspace.sh — workspace identity resolver.
 # A "workspace" groups sessions by project: usually a git repo. Identity
 # is `<sanitized-basename>-<hash8>`, where hash8 is sha256 of the absolute
