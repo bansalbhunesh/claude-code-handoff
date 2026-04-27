@@ -260,13 +260,13 @@ The five hook entries the installer wires up:
 
 | Platform | Status | Notes |
 |---|---|---|
-| **macOS** | Fully supported | Tested locally + CI on `macos-latest` |
-| **Linux** | Fully supported | CI runs on `ubuntu-latest` every push |
-| **Windows / Git Bash** | Should work | Claude Code uses Git Bash on Windows natively (since 2025); same shell, same scripts. **Caveat:** NTFS doesn't enforce POSIX file modes — `chmod 600` / `chmod 700` are advisory there |
-| **Windows / WSL** | Works like Linux | Recommended over Git Bash for proper file-mode enforcement |
-| **Windows / native PowerShell** | Not supported | Scripts are bash. A PowerShell port is on the roadmap if there's demand — open an issue |
+| **macOS** | Fully supported, **CI tested** on `macos-latest` | — |
+| **Linux** | Fully supported, **CI tested** on `ubuntu-latest` | — |
+| **Windows / Git Bash** | Fully supported, **CI tested** on `windows-latest` | Same shell Claude Code uses on Windows natively (since 2025). NTFS doesn't enforce POSIX file modes, so `chmod 600` / `chmod 700` calls succeed but the bits are advisory; access control comes from Windows ACLs which inherit from your user dir (still owner-private in practice). Mode-bits *tests* skip on Windows for this reason; behavior tests run there. |
+| **Windows / WSL** | Works like Linux | Recommended over Git Bash if you want hard-enforced POSIX permissions on a Linux filesystem. |
+| **Windows / native PowerShell** | Not supported | Scripts are bash. A PowerShell port is on the roadmap if there's demand — [open an issue](.github/ISSUE_TEMPLATE/feature_request.yml). |
 
-CI matrix runs both `ubuntu-latest` and `macos-latest`; Windows is intentionally not in CI yet because the official runners require some Git-Bash-specific path handling that hasn't been validated.
+The CI matrix runs all three of `ubuntu-latest`, `macos-latest`, and `windows-latest` on every push and PR. The shellcheck + bash-syntax + json-validation + test-suite pipeline is identical across all three.
 
 ---
 
@@ -331,7 +331,10 @@ Modern Claude Code uses `TaskCreate` / `TaskUpdate` instead of `TodoWrite`. The 
 Both load the same packet. `/resume` is a slash command you type; auto-resume is a `SessionStart` hook that injects automatically. Auto-resume relies on undocumented behavior (size limits, presentation to the model), so it's opt-in. Manual is recommended until you've confirmed it works for your setup.
 
 **Can I run this on a shared machine?**
-Yes, but each user gets their own `~/.claude/handoff/`. If you share `$HOME` (rare), the mode-700 directory stops other users from reading packets, but anyone with the same UID could.
+Yes, but each user gets their own `~/.claude/handoff/`. If you share `$HOME` (rare), the mode-700 directory stops other users from reading packets, but anyone with the same UID could. On Windows / NTFS, the same isolation comes from your user dir's ACL, not from POSIX modes.
+
+**Does it run on Windows?**
+Yes — on Git Bash (which is what Claude Code itself uses on Windows since 2025) and on WSL. Native PowerShell isn't supported because the scripts are bash. CI runs the full test suite on `windows-latest` every push; mode-bits tests skip there since NTFS doesn't enforce POSIX modes.
 
 **What about Codex / Cursor / other AI coding tools?**
 Right now this is Claude-Code-specific because it depends on Claude Code's hook events (`PreCompact`, `SessionEnd`, `SessionStart`). If similar tools expose comparable hooks, a port would be small. PRs welcome.
