@@ -8,8 +8,6 @@
 
 > **Persistent state for Claude Code: snapshot every session before compaction, group packets by project, surface only the signal, and expose your auto-memory through a typed plugin contract.**
 
-![demo](assets/demo.gif)
-
 ```bash
 brew tap bansalbhunesh/claude-state
 brew install claude-state
