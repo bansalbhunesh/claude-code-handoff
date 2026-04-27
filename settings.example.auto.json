@@ -4,13 +4,13 @@
       {
         "matcher": "compact",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/scripts/handoff-resume.sh" }
+          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/resume.sh" }
         ]
       },
       {
         "matcher": "resume",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/scripts/handoff-resume.sh" }
+          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/resume.sh" }
         ]
       }
     ]

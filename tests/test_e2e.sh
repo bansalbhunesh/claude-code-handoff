@@ -11,8 +11,8 @@ TESTS_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$TESTS_DIR/.." && pwd)
 . "$TESTS_DIR/lib.sh"
 
-SNAPSHOT="$REPO_ROOT/scripts/handoff-snapshot.sh"
-RESUME="$REPO_ROOT/scripts/handoff-resume.sh"
+SNAPSHOT="$REPO_ROOT/modules/handoff/snapshot.sh"
+RESUME="$REPO_ROOT/modules/handoff/resume.sh"
 
 # Build a JSONL transcript with the shapes handoff-snapshot.sh actually
 # parses out: a couple of user messages (one meta we should ignore, one

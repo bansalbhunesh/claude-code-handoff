@@ -4,20 +4,20 @@
       {
         "matcher": "auto",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/snapshot.sh" }
         ]
       },
       {
         "matcher": "manual",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/snapshot.sh" }
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/scripts/handoff-snapshot.sh" }
+          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/snapshot.sh" }
         ]
       }
     ]

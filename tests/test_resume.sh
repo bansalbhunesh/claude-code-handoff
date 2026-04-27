@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034  # locals used by eval-driven asserts
-# tests/test_resume.sh — exercises scripts/handoff-resume.sh.
+# tests/test_resume.sh — exercises modules/handoff/resume.sh.
 #
 # Implementation note: the resume script reads JSON on stdin and emits
 # JSON on stdout (the SessionStart hookSpecificOutput shape). Earlier
@@ -16,7 +16,7 @@ TESTS_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$TESTS_DIR/.." && pwd)
 . "$TESTS_DIR/lib.sh"
 
-RESUME="$REPO_ROOT/scripts/handoff-resume.sh"
+RESUME="$REPO_ROOT/modules/handoff/resume.sh"
 
 # --- tests ---
 

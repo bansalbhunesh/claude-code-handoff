@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.3.0 — installer
-# Installs claude-code-handoff into ~/.claude/.
-# Idempotent: safe to run multiple times. Backs up settings.json on
-# successful merge. Pass --auto to also wire SessionStart auto-resume,
-# omit it to remove any previously-installed SessionStart auto-resume
-# entries (mode toggling works in both directions).
+# claude-state v0.4.0 — installer
+# Installs claude-state into ~/.claude/. Idempotent: safe to run multiple
+# times. Backs up settings.json on successful merge. Pass --auto to also
+# wire SessionStart auto-resume.
+#
+# v0.3 → v0.4 migration: legacy hook entries that point at
+# ~/.claude/scripts/handoff-{snapshot,resume}.sh are stripped before the
+# new entries are inserted, so an upgrade in place picks up the new
+# layout without manual settings surgery.
 
 set -euo pipefail
 
@@ -49,32 +52,71 @@ case "$jq_version" in
     ;;
 esac
 
-mkdir -p "$claude_dir/scripts" "$claude_dir/commands" "$claude_dir/handoff" "$claude_dir/bin"
+# Layout under $claude_dir:
+#   bin/claude-state                              — entry point on PATH
+#   bin/claude-handoff                            — deprecation shim
+#   claude-state/lib/common.sh                    — shared helpers
+#   claude-state/modules/handoff/snapshot.sh      — pre-compact / session-end hook
+#   claude-state/modules/handoff/resume.sh        — session-start hook
+#   commands/resume.md                            — /resume slash command
+#   handoff/                                      — packet data (mode 700; created lazily)
+mkdir -p \
+  "$claude_dir/bin" \
+  "$claude_dir/commands" \
+  "$claude_dir/handoff" \
+  "$claude_dir/claude-state/lib" \
+  "$claude_dir/claude-state/modules/handoff"
 chmod 700 "$claude_dir/handoff" 2>/dev/null || true
 
-# Use install(1)-style replace: rm-then-cp, so foreign-owned existing
-# scripts don't fail under set -e.
-for src_rel in scripts/handoff-snapshot.sh scripts/handoff-resume.sh bin/claude-handoff; do
-  dst="$claude_dir/$src_rel"
+# Use rm-then-cp so foreign-owned existing files don't fail under set -e.
+install_file() {
+  local src="$1" dst="$2" mode="${3:-}"
   rm -f "$dst"
-  cp "$repo_dir/$src_rel" "$dst"
-  chmod +x "$dst"
-done
-rm -f "$claude_dir/commands/resume.md"
-cp "$repo_dir/commands/resume.md" "$claude_dir/commands/resume.md"
+  cp "$src" "$dst"
+  [ -n "$mode" ] && chmod "$mode" "$dst"
+}
+
+install_file "$repo_dir/lib/common.sh"                        "$claude_dir/claude-state/lib/common.sh"               644
+install_file "$repo_dir/modules/handoff/snapshot.sh"          "$claude_dir/claude-state/modules/handoff/snapshot.sh" 755
+install_file "$repo_dir/modules/handoff/resume.sh"            "$claude_dir/claude-state/modules/handoff/resume.sh"   755
+install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                         755
+install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                       755
+install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                       644
+
+# Best-effort cleanup of v0.3 layout. We delete the script files only;
+# we leave $claude_dir/scripts/ in place if it still has unrelated files.
+rm -f "$claude_dir/scripts/handoff-snapshot.sh" "$claude_dir/scripts/handoff-resume.sh" 2>/dev/null || true
+rmdir "$claude_dir/scripts" 2>/dev/null || true
 
 settings="$claude_dir/settings.json"
 [ -f "$settings" ] || echo "{}" > "$settings"
 
-# Atomic merge into a mktemp; trap cleans up if anything fails before mv.
+# Atomic merge.
 tmp=$(mktemp "$settings.tmp.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
-snap_cmd='$HOME/.claude/scripts/handoff-snapshot.sh'
-resume_cmd='$HOME/.claude/scripts/handoff-resume.sh'
+snap_cmd='$HOME/.claude/claude-state/modules/handoff/snapshot.sh'
+resume_cmd='$HOME/.claude/claude-state/modules/handoff/resume.sh'
 
-jq --arg snap "$snap_cmd" --arg resume "$resume_cmd" --argjson auto "$auto" '
+# Regex that matches BOTH the old v0.3 path tail and the new v0.4 path
+# tail. Used to strip stale entries before re-adding fresh ones, so an
+# upgrade picks up the new layout without leaving v0.3 hook strings behind.
+# Anchored at `/` so it can't match unrelated user scripts (e.g.
+# /usr/local/my-handoff-snapshot.sh) — same anchoring contract as v0.3.
+strip_pattern='/(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\.sh$'
+
+jq --arg snap "$snap_cmd" \
+   --arg resume "$resume_cmd" \
+   --arg strip "$strip_pattern" \
+   --argjson auto "$auto" '
   def hook_entry($cmd): {type: "command", command: $cmd};
+
+  # Drop any of OUR hook entries (old or new path) so the merge below
+  # adds clean ones — covers both fresh install and v0.3 → v0.4 upgrade.
+  def strip_ours(arr):
+    arr
+    | map(.hooks |= map(select((.command // "") | test($strip) | not)))
+    | map(select((.hooks // []) | length > 0));
 
   def add_or_create($matcher; $cmd):
     if any(.[]?; .matcher == $matcher) then
@@ -86,37 +128,37 @@ jq --arg snap "$snap_cmd" --arg resume "$resume_cmd" --argjson auto "$auto" '
       . + [{matcher: $matcher, hooks: [hook_entry($cmd)]}]
     end;
 
-  # Drop matcher entries left empty after filtering.
   def drop_empty: map(select((.hooks // []) | length > 0));
 
-  # Strip hooks whose command path matches our resume script (toggle off).
-  def strip_resume(arr):
-    arr
-    | map(.hooks |= map(select((.command // "") | test("/handoff-resume\\.sh$") | not)))
-    | drop_empty;
-
-  # Repair .hooks if it is something other than an object.
   if (.hooks // null | type) != "object" then .hooks = {} else . end
-  | .hooks.PreCompact = ((.hooks.PreCompact // []) | add_or_create("auto"; $snap) | add_or_create("manual"; $snap))
+  | .hooks.PreCompact = (
+      strip_ours(.hooks.PreCompact // [])
+      | add_or_create("auto"; $snap)
+      | add_or_create("manual"; $snap))
   | .hooks.SessionEnd = (
-      (.hooks.SessionEnd // [])
+      strip_ours(.hooks.SessionEnd // [])
       | (if any(.[]?; (.hooks // []) | any(.command == $snap))
           then .
           else . + [{hooks: [hook_entry($snap)]}]
         end))
   | if $auto == 1 then
-      .hooks.SessionStart = ((.hooks.SessionStart // []) | add_or_create("compact"; $resume) | add_or_create("resume"; $resume))
+      .hooks.SessionStart = (
+        strip_ours(.hooks.SessionStart // [])
+        | add_or_create("compact"; $resume)
+        | add_or_create("resume"; $resume))
     else
-      .hooks.SessionStart = (strip_resume(.hooks.SessionStart // []))
+      .hooks.SessionStart = (strip_ours(.hooks.SessionStart // []))
     end
   | if (.hooks.SessionStart | length) == 0 then del(.hooks.SessionStart) else . end
+  | if (.hooks.PreCompact   | length) == 0 then del(.hooks.PreCompact)   else . end
+  | if (.hooks.SessionEnd   | length) == 0 then del(.hooks.SessionEnd)   else . end
 ' "$settings" > "$tmp"
 
 jq -e . "$tmp" >/dev/null || { echo "error: merged settings.json is not valid JSON; aborting" >&2; exit 1; }
 
 # Backup AFTER successful merge so failed runs don't spam .backup-* files.
-backup="$settings.backup-$(date +%Y%m%d-%H%M%S)-$$"
 if [ -f "$settings" ] && ! cmp -s "$tmp" "$settings"; then
+  backup="$settings.backup-$(date +%Y%m%d-%H%M%S)-$$"
   cp "$settings" "$backup"
   echo "Backed up previous settings to $backup"
 fi
@@ -128,17 +170,19 @@ mode="manual"
 
 cat <<EOF
 
-Installed claude-code-handoff (mode: $mode).
-  scripts:  $claude_dir/scripts/handoff-snapshot.sh
-            $claude_dir/scripts/handoff-resume.sh
+Installed claude-state v0.4.0 (mode: $mode).
+  modules:  $claude_dir/claude-state/modules/handoff/snapshot.sh
+            $claude_dir/claude-state/modules/handoff/resume.sh
+  lib:      $claude_dir/claude-state/lib/common.sh
   command:  $claude_dir/commands/resume.md
-  cli:      $claude_dir/bin/claude-handoff   (run --help; add to \$PATH for convenience)
-  packets:  $claude_dir/handoff/   (mode 700; packets are mode 600)
+  cli:      $claude_dir/bin/claude-state           (run --help; add to \$PATH for convenience)
+            $claude_dir/bin/claude-handoff         (deprecation shim — forwards to claude-state)
+  packets:  $claude_dir/handoff/                   (mode 700; packets are mode 600)
   hooks:    merged into $settings
 
 Verify:
   1. In a Claude Code session, run /compact. Status line should show
-     'PreCompact [...handoff-snapshot.sh] completed successfully'.
+     'PreCompact [...modules/handoff/snapshot.sh] completed successfully'.
   2. ls -t $claude_dir/handoff/   # newest packet on top
   3. In a fresh session, type /resume — Claude should summarize the packet.
 EOF
