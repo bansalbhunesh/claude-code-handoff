@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-27
+
+**M3: structured memory.** A typed CLI layered on top of the harness's existing markdown memory store at `~/.claude/projects/<sanitized-cwd>/memory/`. Storage doesn't change — the harness keeps reading `MEMORY.md` like always — v0.6 adds state, links, and a versioned JSON plugin contract that other tools can call instead of parsing markdown.
+
+### Added
+- `lib/memory.sh` — memory directory resolver (sanitizes cwd by replacing `/` with `-`, matching the harness's observed format), YAML-frontmatter read/write helpers, JSON contract emission, and `MEMORY.md` auto-compile.
+- `claude-state memory list [--type T] [--state S] [--json]` — table or JSON output of the user's memories.
+- `claude-state memory get <name> [--json]` — read one memory (raw markdown or contract-shape JSON).
+- `claude-state memory add --name N --type T --description D` — create a new memory. Content via `--content -` (stdin), `--content "text"`, or interactive `$EDITOR`. Defaults `created` to now and `created_session` from `$HANDOFF_SESSION_ID` or `~/.claude/handoff/.last_session`.
+- `claude-state memory archive <name>` — flip state to `archived`. File stays in place; drops from active `MEMORY.md`.
+- `claude-state memory supersede <old> --by <new>` — flip `<old>` to `superseded`, write `superseded_by: <new>` link.
+- `claude-state memory query [--type T] [--state S] [--keyword K] [--json | --no-json]` — the **plugin contract** entry point. JSON shape is versioned (`version: 1`); plugins read this instead of parsing markdown.
+- `claude-state memory rebuild-index` — regenerate `MEMORY.md` from active memories. Sorted by type then name. Honors `MEMORY.md.header` and `MEMORY.md.footer` files (so users can preface manual notes that survive regenerations).
+- New frontmatter fields (additive, optional, all default-aware):
+  - `state: active | archived | superseded` (defaults to `active`)
+  - `created: <iso8601>`
+  - `created_session: <session-id>` (legacy alias `originSessionId` is read for back-compat)
+  - `superseded_by: <other-name>` (set by `memory supersede`)
+- `tests/test_memory.sh` — 18 cases: add round-trip, frontmatter shape, MEMORY.md auto-compile, duplicate-name rejection, traversal-name rejection, get round-trip, list type/state filters, archive flow, supersede flow, query JSON schema (every contract field present, `version: 1`), query filters (type/keyword), legacy `originSessionId` surfacing under canonical `created_session`, rebuild-index idempotency + header/footer support, and malformed-frontmatter no-crash.
+
+### Plugin contract (stable, versioned)
+
+`claude-state memory query --json` emits:
+
+```json
+{
+  "version": 1,
+  "memories": [
+    {
+      "name":            "<filename without .md>",
+      "type":            "feedback | user | project | reference | <custom>",
+      "description":     "<one-line>",
+      "state":           "active | archived | superseded",
+      "created":         "<iso8601 or null>",
+      "created_session": "<sid or null>",
+      "superseded_by":   "<other-name or null>",
+      "path":            "<absolute path>"
+    }
+  ]
+}
+```
+
+Plugins should call this CLI instead of parsing markdown. Field additions are non-breaking; field removals or shape changes require a major bump (`version: 2`). Old `version: 1` consumers must keep working through v1.x.
+
+### Tests
+- 115 → 133. `tests/test_memory.sh` adds 18 cases.
+
 ## [0.5.0] - 2026-04-27
 
 **M2: signal scoring.** Snapshots now triage assistant reasoning blocks through a heuristic relevance scorer. High-signal blocks (decisions, blockers, file references, goal-restates) land in the main `## Recent assistant reasoning` section; low-signal blocks (filler acks, short progress notes) drop into a collapsed `<details>` block at packet bottom — lossless by default.
@@ -110,6 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Goal extractor using JSONL `isCompactSummary` / `isMeta` flags + array-shape user content support.
 - Security hardening: `umask 077`, `chmod 700` on handoff dir, `chmod 600` on packets, symlink protection, session-id regex.
 
+[0.6.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.6.0
 [0.5.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.5.0
 [0.4.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.4.0
 [0.3.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.3.0

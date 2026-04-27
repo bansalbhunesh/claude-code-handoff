@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
-[![Tests: 115/115](https://img.shields.io/badge/tests-115%2F115-brightgreen.svg)](tests/)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Tests: 133/133](https://img.shields.io/badge/tests-133%2F133-brightgreen.svg)](tests/)
 
 > **Claude Code forgets. This plugin remembers — and now knows which project to remember it for.**
 >
@@ -154,6 +154,7 @@ claude-state status
 | `claude-state status` | Install state, mode, jq version, packet count |
 | `claude-state path` | Print the handoff directory path |
 | `claude-state signal <packet> [--explain] [--threshold N] [--raw]` | Re-score a packet's reasoning section |
+| `claude-state memory list/get/add/archive/supersede/query/rebuild-index` | Typed CLI for the markdown memory store; `query --json` is the v=1 plugin contract |
 | `claude-state prune --older-than 30d` | Delete packets older than 30 days (interactive) |
 | `claude-state prune --keep 20` | Keep 20 most recent, delete the rest (interactive) |
 | `claude-state help` | Show usage |
@@ -264,6 +265,80 @@ threshold=0   kept=5   dropped=0   total=5
 **Mandatory keeps** (override threshold, including `--threshold 0`): the first message containing goal-restate keywords; the last 2 messages (recency safety net).
 
 **Heuristic, not LLM-based.** Hooks must stay sync, fast, no network. A future `claude-state signal --rescore --llm` could be a separate, opt-in offline step (out of scope for v0.5).
+
+---
+
+## Structured memory (v0.6)
+
+The harness already loads `~/.claude/projects/<sanitized-cwd>/memory/MEMORY.md` into every conversation. v0.6 adds a typed CLI layered ON TOP of that store — new frontmatter fields (`state`, `created`, `created_session`, `superseded_by`) are additive and optional, the harness keeps reading what it always read, and a versioned JSON plugin contract lets other tools query memories without parsing markdown.
+
+```
+$ claude-state memory list
+NAME                           TYPE       STATE      DESCRIPTION
+commit_coauthor                feedback   active     For commits made on this user's behalf, use 'Co-Authored-By: bhunesh bansal'
+
+$ claude-state memory query --json | jq '.memories[0]'
+{
+  "name": "commit_coauthor",
+  "type": "feedback",
+  "description": "For commits made on this user's behalf, use 'Co-Authored-By: bhunesh bansal'",
+  "state": "active",
+  "created": null,
+  "created_session": "ea5f8eed-4c06-4485-81fb-4b8fd5efcc4c",
+  "superseded_by": null,
+  "path": "/Users/ankur/.claude/projects/-Users-ankur/memory/commit_coauthor.md"
+}
+```
+
+| Subcommand | Effect |
+|---|---|
+| `claude-state memory list [--type T] [--state S] [--json]` | Table or JSON output of memories |
+| `claude-state memory get <name> [--json]` | Read one memory (markdown or contract JSON) |
+| `claude-state memory add --name N --type T --description D` | Create a memory; content via `--content -` (stdin), `--content "text"`, or `$EDITOR` |
+| `claude-state memory archive <name>` | Flip `state` to `archived`; drops from active `MEMORY.md` |
+| `claude-state memory supersede <old> --by <new>` | Flip `<old>` to `superseded`, write `superseded_by: <new>` |
+| `claude-state memory query [--type T] [--state S] [--keyword K] [--json]` | Plugin contract entry point (`version: 1`) |
+| `claude-state memory rebuild-index` | Regenerate `MEMORY.md` from active memories |
+
+### Memory plugin contract
+
+`claude-state memory query --json` emits a stable, versioned JSON document. Plugins should read this instead of parsing markdown:
+
+```json
+{
+  "version": 1,
+  "memories": [
+    {
+      "name":            "<filename-without-.md>",
+      "type":            "feedback | user | project | reference | <custom>",
+      "description":     "<one-line>",
+      "state":           "active | archived | superseded",
+      "created":         "<iso8601 or null>",
+      "created_session": "<handoff session id or null>",
+      "superseded_by":   "<other-name or null>",
+      "path":            "<absolute path>"
+    }
+  ]
+}
+```
+
+Field additions are non-breaking. Field removals or shape changes require a major bump (`version: 2`). Old `version: 1` consumers must keep working through v1.x. The legacy frontmatter field `originSessionId` is read for back-compat and surfaced under the canonical `created_session` key.
+
+### Frontmatter additions
+
+```yaml
+---
+name: commit_coauthor                          # required (filename)
+description: <one-line>                        # optional
+type: feedback                                 # optional
+state: active                                  # optional, default 'active'
+created: 2026-04-27T07:00:00Z                  # optional
+created_session: ea5f8eed-4c06-...             # optional (legacy: originSessionId)
+superseded_by: <other-memory-name>             # set by `memory supersede`
+---
+```
+
+Existing memory files keep working unchanged. Missing fields default sensibly (`state: active`, others empty).
 
 ---
 
