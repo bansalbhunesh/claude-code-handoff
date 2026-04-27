@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/scripts/handoff-resume.sh" }
+        ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/scripts/handoff-resume.sh" }
+        ]
+      }
+    ]
+  }
+}

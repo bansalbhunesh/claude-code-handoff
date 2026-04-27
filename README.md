@@ -12,36 +12,42 @@ Manually re-explaining "where I was" wastes tokens and time, and the new session
 
 On every `PreCompact` and `SessionEnd` event, a hook script writes a markdown packet to `~/.claude/handoff/<session_id>.md` containing:
 
-- **Original goal** — first real user message
-- **Current todos** — last `TodoWrite` snapshot
+- **Original goal** — first real user message (filtered using the JSONL `isCompactSummary` / `isMeta` flags, not just text prefix matching)
+- **Continues from** — when this session is a successor (post-compaction or `--resume`), the prior session id, so packets form a chain
+- **Current todos** — last `TodoWrite` snapshot (often empty in modern sessions; see Limitations)
 - **Task tracker** — `TaskCreate` / `TaskUpdate` reduced to current state
 - **Recently edited files** — last 20 `Edit` / `Write` / `MultiEdit` / `NotebookEdit` calls
 - **Recent assistant reasoning** — last 5 prose blocks (where decisions and dead-ends live)
 
-A `/resume` slash command reads the most recent packet and produces a 4–6 line summary, then waits for your direction before doing anything.
+Two ways to consume the packet:
+
+- **Manual** (default): a `/resume` slash command reads the most recent packet, summarizes it in 4–6 lines, and waits for your direction.
+- **Automatic** (opt-in via `./install.sh --auto`): a `SessionStart` hook injects the packet via `hookSpecificOutput.additionalContext` on every `compact` or `resume` start — no typing required. Opt-in because some of the underlying mechanism (size limits, presentation to the model) is undocumented; see Limitations.
 
 ## Requirements
 
 - Claude Code (CLI)
-- `bash`
-- `jq`
+- `bash` (3.2+; macOS default works)
+- `jq` ≥ 1.6 (for the `//=` operator the installer uses; macOS Homebrew, Ubuntu 20.04+ apt, all newer distros are fine)
 
 ## Install
 
 ```bash
 git clone https://github.com/<you>/claude-code-handoff.git
 cd claude-code-handoff
-./install.sh
+./install.sh           # manual mode (recommended for first-time)
+# or:
+./install.sh --auto    # also wire SessionStart auto-resume
 ```
 
 The installer:
 
-- Copies `handoff-snapshot.sh` to `~/.claude/scripts/`
+- Copies `handoff-snapshot.sh` and `handoff-resume.sh` to `~/.claude/scripts/`
 - Copies `resume.md` to `~/.claude/commands/`
 - Creates `~/.claude/handoff/`
-- Backs up your existing `~/.claude/settings.json` and merges the hooks block (preserves any other hooks you already have)
+- Backs up your existing `~/.claude/settings.json` and merges the hooks block (preserves any other hooks you already have, including third-party hooks on the same matcher)
 
-It is idempotent — safe to run multiple times.
+It is idempotent — safe to run multiple times. To switch modes, re-run with or without `--auto`: running without the flag actively *removes* any previously-installed `SessionStart` auto-resume entries (mode toggling works in both directions). To remove everything, run `./uninstall.sh`.
 
 ## Verify
 
@@ -58,22 +64,45 @@ It is idempotent — safe to run multiple times.
 
 ## How it works
 
-Three hook events are wired:
+Hook events wired by `install.sh`:
 
-| Event | Matcher | When it fires |
-|---|---|---|
-| `PreCompact` | `auto` | Just before context-limit-driven auto-compaction |
-| `PreCompact` | `manual` | When you type `/compact` |
-| `SessionEnd` | (any) | When a session terminates (`clear`, `logout`, `prompt_input_exit`, etc.) |
+| Event | Matcher | Mode | Script | When it fires |
+|---|---|---|---|---|
+| `PreCompact` | `auto` | always | `handoff-snapshot.sh` | Just before context-limit-driven auto-compaction |
+| `PreCompact` | `manual` | always | `handoff-snapshot.sh` | When you type `/compact` |
+| `SessionEnd` | (any) | always | `handoff-snapshot.sh` | When a session terminates (`clear`, `logout`, `prompt_input_exit`, etc.) |
+| `SessionStart` | `compact` | `--auto` only | `handoff-resume.sh` | When a fresh session begins after compaction |
+| `SessionStart` | `resume` | `--auto` only | `handoff-resume.sh` | When a session is resumed (`claude --resume`) |
 
-Each fires the same script, which receives `session_id`, `transcript_path`, `cwd`, and the event name on stdin and produces a packet. Always exits 0 — never blocks the underlying event.
+`handoff-snapshot.sh` receives `session_id`, `transcript_path`, `cwd`, and the event name on stdin, parses the transcript JSONL, and writes a packet. Always exits 0.
+
+`handoff-resume.sh` (auto mode only) receives `session_id`, `cwd`, and `source` on stdin, finds the most relevant packet (matching `session_id` first, then most recently modified), caps the content to ~16 KB, and emits a JSON object with `hookSpecificOutput.additionalContext` so Claude Code injects the packet into the new session's context. Always exits 0.
+
+## Security
+
+Handoff packets capture **verbatim user prompts and assistant prose** — including anything you pasted into the conversation (API keys, `.env` content, passwords, tokens) and anything the assistant repeated back in its replies. The packet then sits on disk under `~/.claude/handoff/` until you delete it.
+
+What the plugin does to mitigate this:
+
+- The `~/.claude/handoff/` directory is created mode `700` (owner-only access); newly written packets are mode `600`.
+- The script refuses to write through a symlinked handoff directory or symlinked output path.
+- The session-id is regex-validated before being used as a filename, blocking path-traversal attempts.
+
+What you should do:
+
+- **Don't paste secrets into the conversation if you're not okay with them ending up in `~/.claude/handoff/`.** If you do, run `./uninstall.sh --purge` (or `rm -rf ~/.claude/handoff/`) to delete the saved packets.
+- Treat `~/.claude/handoff/` as sensitive — back it up only to encrypted destinations, never commit it.
+- The `/resume` slash command will need `Bash` permission the first time you run it (it does `ls -t` to find the latest packet). Approve when prompted.
+
+The plugin does **no** automatic rotation — packets accumulate indefinitely. Disk usage grows linearly with session count. Sweep periodically with something like `find ~/.claude/handoff -mtime +30 -delete` if you want.
 
 ## Limitations
 
-- **Goal heuristic is fuzzy.** "Original goal" is the first user message that doesn't start with `<` (command/tool meta) or `⏺` (a Claude reply pasted back). Real first prompts that happen to start with those characters will be skipped.
-- **Each packet describes one session.** When auto-compaction creates a new session id, the new session's packet won't include the previous session's edits or todos. Older packets remain on disk under their own ids.
-- **Manual resume only for now.** You have to type `/resume` after a compaction or restart. See roadmap for auto-resume.
-- **Goal field shows the compact summary on already-compacted sessions.** Accurate but not always what you want.
+- **Each packet describes one session.** Older packets remain on disk under their own ids; chains are linked via the `continues_from` field, but resume currently only loads one packet at a time.
+- **`Current todos` is usually empty.** Modern Claude Code sessions use `TaskCreate` / `TaskUpdate` rather than `TodoWrite`. The `Current todos` section is kept for back-compat; the actually-useful section is `Task tracker`.
+- **Auto-resume relies on undocumented behavior.** `SessionStart` hooks documenting `hookSpecificOutput.additionalContext` is documented; the size limit, the way the injected text is presented to the model, and the version-availability of the field are not. The plugin caps injection at 16 KB defensively. If a future Claude Code release changes the mechanism, fall back to manual mode (`./uninstall.sh && ./install.sh`).
+- **Goal heuristic is best-effort.** Filters out compact summaries (via the JSONL `isCompactSummary` flag), command meta (`isMeta` flag, plus `<`/`⏺` text-prefix fallback), and empty messages. Sessions whose entire first stretch is slash-commands will report `(unknown)` — that's accurate, not a bug.
+- **`SessionEnd` doesn't distinguish crash from clean exit.** It does fire on `clear` / `logout` / `prompt_input_exit`, but not on hard kills (SIGKILL) or harness crashes — those silently lose the packet.
 
 ## Uninstall
 
@@ -85,9 +114,9 @@ Removes the script and slash command, strips our hook entries from `settings.jso
 
 ## Roadmap
 
-- **v2 — automatic resume.** Wire a `SessionStart` hook with `matcher: "compact"` and `matcher: "resume"` that emits the packet via `hookSpecificOutput.additionalContext`, so the new session sees prior state without you typing `/resume`. Deferred pending verification that `SessionStart` accepts that injection shape.
-- **Smarter goal extraction** — fall back to the longest short user message in the first N turns when the heuristic finds nothing useful.
-- **Cross-session chaining** — when a packet is written for a session that succeeded an earlier one, link to the prior packet so resume can walk back.
+- **Cross-session chain walking.** Today `continues_from` is captured in the packet but `/resume` only loads one packet. Make resume walk the chain (limited depth) and merge the packets, so a session that's been compacted multiple times can still recover early-session decisions.
+- **Pre-compact size monitoring.** Currently we snapshot at `PreCompact` (the only context-aware trigger Claude Code exposes). If a `context_used_pct` env var ever appears, fire snapshots earlier (e.g., 70% full) so packets don't always reflect the most-degraded state.
+- **Empirical sizing for `additionalContext`.** Test what size of injection actually makes it through and adjust the 16 KB cap based on findings.
 
 ## Contributing
 

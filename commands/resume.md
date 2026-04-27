@@ -4,12 +4,14 @@ description: Load the most recent handoff packet so this session can pick up whe
 
 You are resuming work from a prior Claude Code session that ended (compaction, /clear, crash, or manual exit).
 
-Find the most recently modified handoff file in `~/.claude/handoff/` and read it. The argument `$ARGUMENTS`, if non-empty, is a session id — prefer `~/.claude/handoff/$ARGUMENTS.md` when set.
+Find and read the most recently modified handoff file under `~/.claude/handoff/`. The argument `$ARGUMENTS`, if non-empty, is a session id — prefer `~/.claude/handoff/$ARGUMENTS.md` when set.
 
 Concretely:
 
-1. Run `ls -t ~/.claude/handoff/*.md 2>/dev/null | head -1` to locate the latest packet (or use the argument-specified path if given).
-2. Read that file with the Read tool.
+1. Locate the latest packet. Use whichever tool is available to you:
+   - **Glob** (preferred): pattern `**/.claude/handoff/*.md` from the user's home directory; results are sorted newest-first.
+   - **Bash** (fallback): `ls -t ~/.claude/handoff/*.md 2>/dev/null | head -1`. The first time `/resume` runs you may see a one-time permission prompt — approve it.
+2. Read that file with the **Read** tool.
 3. In your reply, summarize for the user in 4–6 lines:
    - the original goal,
    - what's done vs pending (from the todos / task tracker sections),
