@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-28
+
+**Plugin contract locked.** v1.0.0 is the line where the JSON shape emitted by `claude-state memory query --json` and the frontmatter shape on handoff packets become a stable, versioned contract. Plugins built against `version: 1` will keep working through the entire v1.x line.
+
+### Added
+- **`docs/plugin-contract.md`** — formal specification for plugin authors. Documents both contract surfaces (memory query JSON + packet frontmatter), every field and its nullability, the version-policy rules, a 4-step "your first plugin" recipe in shell + Python, and an explicit list of what the contract does *not* promise (path stability, file format on disk, sort order, CLI flag names, performance). 1934 words, 7 sections.
+
+### Changed
+- README badges bumped to v1.0.0; line-count claim corrected from "~250 lines" (a v0.3-era number) to "~2500 lines" (current).
+- README adds a one-line callout linking the new plugin contract spec.
+
+### Plugin contract policy (effective from v1.0.0)
+
+The two contract surfaces are:
+
+1. **`claude-state memory query --json`** — the typed query endpoint over the user's auto-memory.
+2. **Handoff packet frontmatter** — the `- key: value` lines at the top of each packet, before the first blank line.
+
+Both carry their own `version` integer. The v1.x guarantee:
+
+- **Field additions are non-breaking.** Plugins must tolerate unknown keys (standard JSON-decode behavior in any language).
+- **No field removed, no type changed, no semantic change** for the lifetime of v1.x.
+- **Versioned per-surface.** The memory contract version and the packet frontmatter version may bump independently in future majors.
+
+If a v2 of either surface ever ships, both `version: 1` and `version: 2` will be supported in parallel for at least one minor cycle so plugins can migrate. There is **no v2 planned** — v1 is intended to be the additive line for the foreseeable future.
+
+### Not v1.0 promises (deliberately)
+- Memory file paths (`~/.claude/projects/<sanitized>/memory/`) may move; plugins must read `path` from the contract, never compute it.
+- The on-disk frontmatter format on packet/memory files is internal — only the CLI output is the contract.
+- CLI flag names are stable but can be deprecated with one minor's notice (the JSON contract has no such notice; it just doesn't change).
+- Sort order in `memories[]`. Consumers must sort if they care.
+- Performance characteristics.
+
 ## [0.6.1] - 2026-04-28
 
 ### Fixed
@@ -162,6 +195,7 @@ Plugins should call this CLI instead of parsing markdown. Field additions are no
 - Goal extractor using JSONL `isCompactSummary` / `isMeta` flags + array-shape user content support.
 - Security hardening: `umask 077`, `chmod 700` on handoff dir, `chmod 600` on packets, symlink protection, session-id regex.
 
+[1.0.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v1.0.0
 [0.6.1]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.6.1
 [0.6.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.6.0
 [0.5.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.5.0

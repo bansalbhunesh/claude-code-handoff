@@ -2,9 +2,10 @@
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
 [![Tests: 133/133](https://img.shields.io/badge/tests-133%2F133-brightgreen.svg)](tests/)
 [![Homebrew](https://img.shields.io/badge/homebrew-claude--state-orange.svg)](https://github.com/bansalbhunesh/homebrew-claude-state)
+[![Plugin contract: v=1](https://img.shields.io/badge/plugin%20contract-v%3D1-blueviolet.svg)](docs/plugin-contract.md)
 
 > **Persistent state for Claude Code: snapshot every session before compaction, group packets by project, surface only the signal, and expose your auto-memory through a typed plugin contract.**
 
@@ -40,7 +41,7 @@ bash install.sh             # add --auto for SessionStart auto-resume
 | `/clear` = total amnesia | SessionEnd hook captures even `/clear` exits |
 | Lost context = re-explore + re-explain | Pick up where you left off, ~5 seconds |
 
-No daemon. No code change. ~250 lines of bash + jq, one install, one uninstall. Plays nice with any other hooks you already have.
+No daemon. No code change in your repo. ~2500 lines of bash + jq, one install, one uninstall, plus a [typed plugin contract (`v=1`)](docs/plugin-contract.md) that other tools can build against. Plays nice with any other hooks you already have.
 
 ---
 
