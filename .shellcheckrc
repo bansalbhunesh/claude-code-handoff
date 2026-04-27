@@ -25,3 +25,9 @@ disable=SC2016
 # SC2329: "This function is never invoked."
 # False positives in tests/lib.sh (functions invoked via `run`).
 disable=SC2329
+
+# SC2317: "Command appears to be unreachable."
+# Ubuntu's shellcheck 0.9.0 reports this on the same eval-driven assert
+# patterns that newer versions report as SC2329. Same intent, same false
+# positive — disabled for the same reason.
+disable=SC2317
