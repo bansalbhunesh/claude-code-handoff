@@ -54,6 +54,18 @@ make_minimal_transcript() {
   } > "$path"
 }
 
+# Like make_minimal_transcript, but the assistant text is set to the
+# caller-provided body. Used to embed keyword content into a packet via
+# the normal snapshot flow (rather than post-editing the packet file,
+# which collides with chmod 600 + mode-700 dir on Git Bash).
+make_keyword_transcript() {
+  local path="$1" body="$2"
+  {
+    jq -nc '{type:"user", message:{content:"goal"}}'
+    jq -nc --arg t "$body" '{type:"assistant", message:{content:[{type:"text", text:$t}]}}'
+  } > "$path"
+}
+
 # --- workspace identity ---
 
 test_id_outside_git_uses_cwd() {
@@ -248,27 +260,26 @@ test_resume_here_errors_when_unknown_workspace() {
 test_resume_keywords_picks_highest_score() {
   local home; home=$(tmpdir)
   mkdir -p "$home/proj"
-  # Embed the keyword text in each transcript's assistant message so the
-  # snapshot writes it through the normal flow (mv from mktemp). Earlier
-  # versions of this test post-edited packets with `>>`, which collided
-  # with the chmod-600 packet mode on some platforms (Git Bash) and the
-  # grep loop saw empty bodies.
   local tx_a="$home/tx_a.jsonl"
   local tx_b="$home/tx_b.jsonl"
   local tx_c="$home/tx_c.jsonl"
-  make_keyword_transcript() {
-    local path="$1" body="$2"
-    {
-      jq -nc '{type:"user", message:{content:"goal"}}'
-      jq -nc --arg t "$body" '{type:"assistant", message:{content:[{type:"text", text:$t}]}}'
-    } > "$path"
-  }
   make_keyword_transcript "$tx_a" "auth bug in middleware-adjacent layer"
   make_keyword_transcript "$tx_b" "auth bug middleware fix landed"
   make_keyword_transcript "$tx_c" "unrelated rendering pipeline tweak"
   invoke_snapshot "$home" "kw_a" "$tx_a" "$home/proj"
   invoke_snapshot "$home" "kw_b" "$tx_b" "$home/proj"
   invoke_snapshot "$home" "kw_c" "$tx_c" "$home/proj"
+  # Sanity: confirm each packet actually got the embedded keyword text
+  # before we exercise the keyword scorer. If snapshot's transcript
+  # extraction silently dropped the text (e.g. CRLF in transcript on
+  # Git Bash), we want a precise error here, not a downstream
+  # "no packets matched".
+  assert 'grep -q "middleware-adjacent" "$home/.claude/handoff/kw_a.md"' \
+    "kw_a packet must contain the embedded text 'middleware-adjacent'"
+  assert 'grep -q "middleware fix landed" "$home/.claude/handoff/kw_b.md"' \
+    "kw_b packet must contain the embedded text 'middleware fix landed'"
+  assert 'grep -q "rendering pipeline" "$home/.claude/handoff/kw_c.md"' \
+    "kw_c packet must contain the embedded text 'rendering pipeline'"
   local out
   out=$(CLAUDE_HOME="$home/.claude" "$CLI" resume --keywords "auth middleware")
   # kw_a matches "auth" + "middleware" via "middleware-adjacent" (score 2),

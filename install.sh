@@ -101,20 +101,15 @@ trap 'rm -f "$tmp"' EXIT
 snap_cmd='$HOME/.claude/claude-state/modules/handoff/snapshot.sh'
 resume_cmd='$HOME/.claude/claude-state/modules/handoff/resume.sh'
 
-# Regex that matches BOTH the old v0.3 path tail and the new v0.4 path
-# tail. Used to strip stale entries before re-adding fresh ones, so an
-# upgrade picks up the new layout without leaving v0.3 hook strings behind.
-#
-# Anchor with `(^|/)` (start-of-string OR a path-segment boundary) so
-# unrelated user scripts (e.g. /usr/local/my-handoff-snapshot.sh) don't
-# match — same anchoring contract as v0.3. We avoid a leading `/` here
-# because Git Bash on Windows would otherwise translate the regex via
-# MSYS path conversion, mangling it before jq sees it.
-strip_pattern='(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\.sh$'
+# Inline the strip regex inside the jq script (rather than passing via
+# `--arg strip "$strip_pattern"`). Git Bash on Windows performs MSYS
+# path-conversion on argv values that look like paths; the previous
+# `--arg` value got mangled mid-flight, so test() never matched our
+# hook tails and v0.4 mode-toggle silently kept SessionStart entries.
+# uninstall.sh has always used the inline form and never had this bug.
 
 jq --arg snap "$snap_cmd" \
    --arg resume "$resume_cmd" \
-   --arg strip "$strip_pattern" \
    --argjson auto "$auto" '
   def hook_entry($cmd): {type: "command", command: $cmd};
 
@@ -135,10 +130,13 @@ jq --arg snap "$snap_cmd" \
 
   # Drop any of OUR hook entries (old or new path) so the merge below
   # adds clean ones — covers both fresh install and v0.3 → v0.4 upgrade.
+  # Anchor the path tail with (^|/) — start-of-string or a path-segment
+  # boundary — so unrelated foreign scripts (e.g. /usr/local/my-handoff-
+  # snapshot.sh) survive untouched.
   def strip_ours(arr):
     arr
     | coalesce_matchers
-    | map(.hooks |= map(select((.command // "") | test($strip) | not)))
+    | map(.hooks |= map(select((.command // "") | test("(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\\.sh$") | not)))
     | map(select((.hooks // []) | length > 0));
 
   def add_or_create($matcher; $cmd):

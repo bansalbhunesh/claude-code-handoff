@@ -257,11 +257,15 @@ test_f6_workspaces_list_null_alias_renders_root_column() {
   invoke_snapshot "$home" "na1" "$tx" "$home/myproj"
   local out
   out=$(CLAUDE_HOME="$home/.claude" "$CLI" workspaces list)
-  # The "→ <root>" continuation line proves root landed in the right
+  # The "  → <root>" continuation line proves root landed in the right
   # column (previously, with \t IFS, root collapsed into the alias slot
-  # and this line never printed when alias was null).
-  assert 'echo "$out" | grep -q "→ $home/myproj"' \
-    "list must show '→ <root>' line for null-alias workspace (got: $out)"
+  # and this line never printed when alias was null). The exact root
+  # path varies across platforms — on Git Bash, mktemp returns POSIX
+  # form `/c/Users/...` but `pwd` inside snapshot resolves to Windows
+  # 8.3 form `C:/Users/RUNNER~1/...` — so match by the line shape and
+  # the basename only, not the literal `$home/...` path.
+  assert 'echo "$out" | grep -qE "^  →.*myproj"' \
+    "list must show '  → <root>' continuation line for null-alias workspace (got: $out)"
 }
 
 test_f6_packet_field_trims_trailing_whitespace() {
