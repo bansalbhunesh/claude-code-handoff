@@ -11,6 +11,15 @@
 
 set -euo pipefail
 
+# Disable MSYS/MinGW automatic POSIX→Windows path translation on Git Bash.
+# Without this, the strip regex passed to jq via `--arg strip '/(...)'`
+# (which starts with `/`) is rewritten by MSYS as a Windows path like
+# `C:\Program Files\Git\(...)` — the regex no longer matches our hook
+# command tails, so v0.4 mode-toggle (auto→manual) fails to strip
+# SessionStart entries on Windows. No-op on Linux/macOS.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 usage() {
   cat <<USAGE
 Usage: $0 [--auto] [-h|--help]

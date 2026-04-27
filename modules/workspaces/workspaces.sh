@@ -131,21 +131,24 @@ cmd_list() {
     return 0
   fi
   printf '%-50s %7s  %s\n' "WORKSPACE" "PACKETS" "LAST SEEN"
-  # Use \x1F (Unit Separator) as the field separator. \t collapses
-  # adjacent tabs (read treats whitespace IFS as a run), which made the
-  # "alias is null" case shift root into the alias slot. \x01 (SOH) is
-  # silently not honored as IFS by bash 3.2 read on macOS — read returns
-  # the whole line in the first variable. \x1F is the right tool.
+  # Emit one field per line and read 5 lines per record. Avoids
+  # control-char IFS pitfalls: bash 3.2 (macOS) doesn't honor \x01 (SOH)
+  # as IFS, Git Bash on Windows doesn't honor \x1F (US) either, and
+  # whitespace IFS like \t collapses adjacent delimiters and shifts
+  # fields when alias is empty. Default IFS + line-per-field is portable.
   jq -r '
     .workspaces
     | to_entries
     | sort_by(.value.last_seen)
     | reverse
     | .[]
-    | [.key, (.value.packet_count|tostring), .value.last_seen, (.value.alias // ""), (.value.root // "")]
-    | join("")
+    | (.key, (.value.packet_count|tostring), .value.last_seen, (.value.alias // ""), (.value.root // ""))
   ' "$index_file" \
-  | while IFS=$'\37' read -r ws cnt last alias_to root; do
+  | while IFS= read -r ws \
+       && IFS= read -r cnt \
+       && IFS= read -r last \
+       && IFS= read -r alias_to \
+       && IFS= read -r root; do
       name="$ws"
       [ -n "$alias_to" ] && name="$ws ($alias_to)"
       printf '%-50s %7s  %s\n' "$name" "$cnt" "$last"
