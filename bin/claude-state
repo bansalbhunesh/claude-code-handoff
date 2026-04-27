@@ -311,25 +311,29 @@ resume_pick_workspace() {
   return 1
 }
 
-# Score packets by distinct-keyword hits (case-insensitive, fixed-string).
-# Tiebreak by recency (mtime), since list_packets_by_mtime already yields
-# newest first. Echoes the winning path, or returns 1 if no packet hits.
+# Score packets by distinct-keyword hits (case-insensitive). Tiebreak
+# by recency (mtime), since list_packets_by_mtime already yields newest
+# first. Echoes the winning path, or returns 1 if no packet hits.
+#
+# Caller (cmd_resume) is responsible for rejecting empty/whitespace-only
+# `keywords` input with a usage error (rc=2) before calling here.
 resume_pick_keywords() {
   local keywords="$1"
   [ -n "$keywords" ] || return 1
-  # shellcheck disable=SC2206  # intentional word splitting on keyword string
-  local kws=( $keywords )
-  # Whitespace-only input word-splits to a zero-length array. Under
-  # bash 3.2 (macOS) `for kw in "${kws[@]}"` then errors with
-  # "kws[@]: unbound variable" because of `set -u`. Return early.
-  [ "${#kws[@]}" -gt 0 ] || return 1
   local f best_score=0 best_path="" score kw
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     score=0
-    for kw in "${kws[@]}"; do
+    # Word-split on default IFS at iteration time (rather than building
+    # an array first). Earlier code used `local kws=( $keywords )` plus
+    # `for kw in "${kws[@]}"`, but that has bash-3.2 + set-u edge cases
+    # (empty-array unbound) and Git Bash array-expansion quirks that
+    # silently dropped the loop on Windows. The straightforward
+    # iteration is portable across bash 3.2 (macOS), 4+, and Git Bash.
+    # shellcheck disable=SC2086  # intentional word splitting
+    for kw in $keywords; do
       [ -z "$kw" ] && continue
-      if grep -qi -F -- "$kw" "$f" 2>/dev/null; then
+      if grep -qi "$kw" "$f" 2>/dev/null; then
         score=$((score + 1))
       fi
     done
