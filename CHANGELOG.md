@@ -7,18 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Windows runner in CI matrix.** `windows-latest` (Git Bash) is now tested on every push and PR alongside `ubuntu-latest` and `macos-latest`.
-- `is_windows` helper in `tests/lib.sh` for tests that need to skip POSIX-only assertions (mode bits) on NTFS.
-- `.gitattributes` forcing LF line endings on shell + JSON + YAML + Markdown so Windows checkouts don't get CRLF that bash/jq mishandle.
+## [0.4.0] - 2026-04-27
 
-### Fixed
-- **Cross-platform `stat`** in `bin/claude-handoff` and `tests/lib.sh`. The previous order `stat -f %Lp || stat -c %a` was wrong on Linux: `stat -f` runs *filesystem* stat there and succeeds with garbage, never reaching the fallback. Flipped to try GNU `-c` first; macOS still works because `stat -c` fails cleanly and falls through to `-f`.
-- CI `shellcheck` failures from intentional patterns (literal `$HOME` in single-quoted strings for hook-runner expansion, eval-driven asserts in tests). Suppressed via `.shellcheckrc` (`SC1091`, `SC2012`, `SC2016`, `SC2317`, `SC2329`) and per-file `# shellcheck disable=SC2034` on test files.
-- Real `SC2155` warning in `bin/claude-handoff:human_age`: split `local now=$(date)` so the subprocess's exit code isn't masked.
+**Project renamed from `claude-code-handoff` to `claude-state`.** The scope outgrew "handoff" — v0.4 adds workspaces, and v0.5 + v0.6 will add signal scoring and structured memory ([PLAN.md](PLAN.md)). `claude-handoff` is kept as a deprecation shim that forwards to `claude-state` and prints a one-line warning; it will be removed in v0.6. See [MIGRATION.md](MIGRATION.md) for the upgrade path.
+
+### Added
+- **Modular layout.** Repo split into `bin/`, `lib/`, `modules/<feature>/`. Shared helpers (`file_mtime`, `human_age`, `hash8`, packet listing, session-id validation) extracted into `lib/common.sh` and sourced by all entry points. Installed at `~/.claude/claude-state/{lib,modules}/...`; binaries at `~/.claude/bin/`.
+- **Workspaces (M1).** A workspace groups sessions by project, identified as `<sanitized-basename>-<8-hex-sha256>`. `bin/claude-state` resolves the id from `git rev-parse --show-toplevel` (or cwd if not in a repo); the 8-char hash prevents collisions across clones at different paths.
+- `claude-state workspaces` (alias `ws`) — `list`, `show <ws>`, `rebuild`, `rename <ws> <alias>`. The list is cached at `~/.claude/handoff/index.json` and rebuilt on demand from packet frontmatter; aliases survive rebuilds.
+- **Workspace frontmatter on packets.** Snapshots now write `workspace:` and `workspace_root:` fields; v0.3 packets are backfilled at index-rebuild time from their `cwd:` field.
+- **Smart `claude-state resume`.** Workspace-aware by default — picks the newest packet whose workspace matches the current cwd, falling back to global newest. Flags: `resume --here` (require workspace match, error otherwise), `resume --keywords "..."` (score by distinct keyword hits), `resume <session-id>` (specific packet), or just `resume <free text>` (auto-detected as keywords).
+- `commands/resume.md` updated to call `claude-state resume` with smart defaults; degrades gracefully to `ls -t` if the CLI is absent.
+- v0.3 → v0.4 settings migration in `install.sh`: legacy hook entries pointing at `~/.claude/scripts/handoff-{snapshot,resume}.sh` are stripped before the new entries are inserted, so an upgrade in place picks up the new layout without manual surgery. The old script files are best-effort removed.
+- **Windows runner in CI matrix** (`windows-latest` via Git Bash) joined `ubuntu-latest` and `macos-latest`. `is_windows` helper in `tests/lib.sh` skips POSIX-only assertions on NTFS. `.gitattributes` forces LF on shell/JSON/YAML/Markdown.
+- `lib/workspace.sh` — workspace identity resolver, sourceable from any module.
+- `tests/test_workspaces.sh` — 16 cases covering id resolution (git/non-git, sanitization, collision avoidance), snapshot frontmatter, rebuild grouping + v0.3 backfill, alias persistence, and all four resume modes.
 
 ### Changed
-- Mode-bits tests (`packet mode 600`, `handoff dir mode 700`) skip on Windows since NTFS doesn't enforce POSIX modes — the `chmod` call still happens, it just isn't observable. Tests that exercise behavior (snapshot writing, install merging, CLI flows) continue to run there.
+- CLI: `claude-handoff` → `claude-state`. The deprecation shim prints `claude-handoff: deprecated in v0.4.0, use \`claude-state\`. Forwarding.` to stderr and `exec`s the new CLI.
+- Hook commands: `~/.claude/scripts/handoff-snapshot.sh` → `~/.claude/claude-state/modules/handoff/snapshot.sh` (same for resume). Settings examples updated.
+- `claude-state status` now lists module install paths and detects either v0.3 or v0.4 hook commands.
+- Resume hookSpecificOutput banner: `[claude-code-handoff] Resuming after …` → `[claude-state] Resuming after …`.
+- Mode-bits tests skip on Windows (NTFS doesn't enforce POSIX modes); behavior tests continue to run there.
+
+### Fixed
+- **Cross-platform `stat`** in `bin/claude-state` and `tests/lib.sh`. Previous order `stat -f %Lp || stat -c %a` was wrong on Linux: `stat -f` runs *filesystem* stat there and succeeds with garbage, never reaching the fallback. Flipped to try GNU `-c` first; macOS falls through cleanly.
+- CI `shellcheck` false positives suppressed via `.shellcheckrc` (`SC1091`, `SC2012`, `SC2016`, `SC2317`, `SC2329`) and per-file `# shellcheck disable=SC2034`.
+
+### Tests
+- 62 → 78 cases. New `test_workspaces.sh` (16). All five existing test files updated for the new module paths and binary name.
 
 ## [0.3.0] - 2026-04-27
 
@@ -66,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Goal extractor using JSONL `isCompactSummary` / `isMeta` flags + array-shape user content support.
 - Security hardening: `umask 077`, `chmod 700` on handoff dir, `chmod 600` on packets, symlink protection, session-id regex.
 
+[0.4.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.4.0
 [0.3.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.3.0
 [0.2.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.2.0
 [0.1.0]: https://github.com/bansalbhunesh/claude-code-handoff/releases/tag/v0.1.0

@@ -1,15 +1,17 @@
-# claude-code-handoff
+# claude-state
 
 [![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
-[![Tests: 62/62](https://img.shields.io/badge/tests-62%2F62-brightgreen.svg)](tests/)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/bansalbhunesh/claude-code-handoff/releases)
+[![Tests: 78/78](https://img.shields.io/badge/tests-78%2F78-brightgreen.svg)](tests/)
 
-> **Claude Code forgets. This plugin remembers.**
+> **Claude Code forgets. This plugin remembers — and now knows which project to remember it for.**
 >
 > Long sessions hit context limits. Claude compacts. The summary it leaves behind keeps the shape but loses the texture — the dead ends, the decisions, the half-finished thought you cared about.
 >
-> `claude-code-handoff` writes a small structured note right before that happens, and lets the next session pick up from it. So the next time you say "where were we?" — the answer is right there.
+> `claude-state` writes a small structured note right before that happens, groups it by the project it came from, and lets the next session pick up from the right one. So the next time you say "where were we?" — the answer is for *this* project, not the last unrelated thing you were doing.
+
+> **Renamed in v0.4.0** (was `claude-code-handoff`). The `claude-state` deprecation shim keeps forwarding through one minor cycle. See [MIGRATION.md](MIGRATION.md) and [PLAN.md](PLAN.md) for what's coming next (signal scoring, structured memory).
 
 ---
 
@@ -74,7 +76,7 @@ build a /handoff slash command + PreCompact hook
 #3. [in_progress] Test the round-trip
 
 ## Recently edited files
-- Write: ~/.claude/scripts/handoff-snapshot.sh
+- Write: ~/.claude/claude-state/modules/handoff/snapshot.sh
 - Edit:  ~/.claude/settings.json
 - Write: ~/.claude/commands/resume.md
 
@@ -114,20 +116,20 @@ Third-party `SessionStart` hooks (from other plugins) are preserved across toggl
 
 ---
 
-## Daily use — `claude-handoff` CLI
+## Daily use — `claude-state` CLI
 
-`bin/claude-handoff` is installed to `~/.claude/bin/`. Add that to your `$PATH`, or invoke by full path.
+`bin/claude-state` is installed to `~/.claude/bin/`. Add that to your `$PATH`, or invoke by full path. (`bin/claude-state` is also installed as a deprecation shim that forwards to `claude-state` and prints a one-line warning; it's removed in v0.6.)
 
 ```text
-$ claude-handoff list
+$ claude-state list
 300b907c-d452-4064-ac2c-ee2b9c98213f        1h 30m ago
 
-1 packet(s). Use 'claude-handoff view <session-id>' to read one.
+1 packet(s). Use 'claude-state view <session-id>' to read one.
 ```
 
 ```text
-$ claude-handoff status
-claude-code-handoff status
+$ claude-state status
+claude-state status
   version (cli):      0.2.0
   jq:                 1.6
   handoff dir:        present (mode 700)
@@ -143,17 +145,17 @@ claude-code-handoff status
 
 | Subcommand | What it does |
 |---|---|
-| `claude-handoff list` | All packets, newest first, with relative ages |
-| `claude-handoff view` | Show the most recent packet |
-| `claude-handoff view <session-id>` | Show a specific packet |
-| `claude-handoff search <pattern>` | Case-insensitive grep across all packets, with surrounding context |
-| `claude-handoff chain [<session-id>]` | Walk `continues_from` links and print the full chain (default: latest) |
-| `claude-handoff edit <session-id>` | Open a packet in `$EDITOR` to redact secrets without losing the rest |
-| `claude-handoff status` | Install state, mode, jq version, packet count |
-| `claude-handoff path` | Print the handoff directory path |
-| `claude-handoff prune --older-than 30d` | Delete packets older than 30 days (interactive) |
-| `claude-handoff prune --keep 20` | Keep 20 most recent, delete the rest (interactive) |
-| `claude-handoff help` | Show usage |
+| `claude-state list` | All packets, newest first, with relative ages |
+| `claude-state view` | Show the most recent packet |
+| `claude-state view <session-id>` | Show a specific packet |
+| `claude-state search <pattern>` | Case-insensitive grep across all packets, with surrounding context |
+| `claude-state chain [<session-id>]` | Walk `continues_from` links and print the full chain (default: latest) |
+| `claude-state edit <session-id>` | Open a packet in `$EDITOR` to redact secrets without losing the rest |
+| `claude-state status` | Install state, mode, jq version, packet count |
+| `claude-state path` | Print the handoff directory path |
+| `claude-state prune --older-than 30d` | Delete packets older than 30 days (interactive) |
+| `claude-state prune --keep 20` | Keep 20 most recent, delete the rest (interactive) |
+| `claude-state help` | Show usage |
 
 **Environment knobs** for the snapshot script (set in your shell or hook env):
 
@@ -164,6 +166,56 @@ claude-code-handoff status
 | `HANDOFF_DEBUG=1` | Append a one-line status to `~/.claude/handoff/.log` per hook fire (for troubleshooting silent hooks) |
 
 `prune` is **always interactive** — it lists what it will delete and asks before removing anything.
+
+---
+
+## Workspaces (v0.4)
+
+A **workspace** groups sessions by project, so `/resume` and `claude-state resume` pick the right packet when you switch repos. Identity is `<sanitized-basename>-<8-char-sha256>`, derived from `git rev-parse --show-toplevel` (or cwd if you're not in a repo). The 8-char hash prevents collisions between two clones of the same repo at different paths, or between unrelated dirs that share a basename.
+
+Snapshots in v0.4 write `workspace:` and `workspace_root:` frontmatter on each packet. Older v0.3 packets are **backfilled** at index-rebuild time from their `cwd:` field, so you don't have to re-run anything to see your history grouped.
+
+```bash
+$ claude-state workspaces
+WORKSPACE                                          PACKETS  LAST SEEN
+claude-code-handoff-fd3ef08c                             7  2026-04-27T08:24:50Z
+  → /Users/ankur/Work/claude-code-handoff
+ankur-26d9bb19                                           2  2026-04-27T01:41:06Z
+  → /Users/ankur
+
+$ claude-state workspaces show claude-code-handoff-fd3ef08c
+Workspace: claude-code-handoff-fd3ef08c
+  root:  /Users/ankur/Work/claude-code-handoff
+  alias: (none)
+  first: 2026-04-27T07:42:01Z
+  last:  2026-04-27T08:24:50Z
+  count: 7
+Packets:
+  11ba59d8-d49f-4fb6-ad0e-34f779c62d95   17m ago
+  ea5f8eed-4c06-4485-81fb-4b8fd5efcc4c   7h 12m ago
+  ...
+```
+
+| Subcommand | Effect |
+|---|---|
+| `claude-state workspaces` (or `ws`) | List all workspaces, newest activity first |
+| `claude-state workspaces show <ws>` | Show one workspace's metadata + packet list |
+| `claude-state workspaces rebuild` | Regenerate `~/.claude/handoff/index.json` from packet frontmatter (preserves aliases) |
+| `claude-state workspaces rename <ws> <alias>` | Set a human-friendly alias (survives rebuilds) |
+
+### Smart `claude-state resume`
+
+The new `resume` subcommand is workspace-aware:
+
+| Invocation | Picks |
+|---|---|
+| `claude-state resume` | Newest packet whose workspace matches `$PWD`'s. Falls back to global newest if no match. |
+| `claude-state resume --here` | Same, but **errors out** if `$PWD` is not in a known workspace. |
+| `claude-state resume --keywords "auth bug"` | Highest-scoring packet by distinct keyword hits, recency tiebreak. |
+| `claude-state resume <session-id>` | Specific packet (like `view <id>` but with a banner). |
+| `claude-state resume <free text>` | Auto-detected: id if known, otherwise `--keywords`. |
+
+The `/resume` slash command was updated to call `claude-state resume` (with a degraded `ls -t` fallback if the CLI is absent), so the model uses the same priority chain you do.
 
 ---
 
@@ -303,9 +355,9 @@ Handoff packets capture **verbatim user prompts and assistant prose** — includ
 
 **What you should do:**
 
-- **Don't paste secrets into the conversation** if you're not comfortable with them ending up in `~/.claude/handoff/`. If you do, run `./uninstall.sh --purge` (or `claude-handoff prune --keep 0`) to delete saved packets.
+- **Don't paste secrets into the conversation** if you're not comfortable with them ending up in `~/.claude/handoff/`. If you do, run `./uninstall.sh --purge` (or `claude-state prune --keep 0`) to delete saved packets.
 - Treat `~/.claude/handoff/` as sensitive — back it up only to encrypted destinations, never commit it.
-- The plugin does **no automatic rotation** — packets accumulate indefinitely. Sweep periodically: `claude-handoff prune --older-than 30d` or `find ~/.claude/handoff -mtime +30 -delete`.
+- The plugin does **no automatic rotation** — packets accumulate indefinitely. Sweep periodically: `claude-state prune --older-than 30d` or `find ~/.claude/handoff -mtime +30 -delete`.
 - **On Windows / Git Bash specifically:** NTFS doesn't enforce POSIX modes. The `chmod` calls succeed but the actual access control comes from Windows ACLs (which inherit from your user dir, so packets are still owner-private in practice). If you want hard-enforced POSIX permissions on Windows, run inside WSL2.
 
 ---
@@ -319,7 +371,7 @@ No. The hook is a single bash invocation that reads the transcript and writes on
 No code changes. No network calls. The packet is local-only, owner-readable.
 
 **Will my packets pile up forever?**
-Yes, until you prune. Run `claude-handoff prune --older-than 30d` periodically or set up a cron. There's a roadmap item to make rotation built-in.
+Yes, until you prune. Run `claude-state prune --older-than 30d` periodically or set up a cron. There's a roadmap item to make rotation built-in.
 
 **What if I have other tools that hook PreCompact / SessionEnd / SessionStart?**
 They keep working. The installer does a `jq` merge, not a clobber. Third-party hooks on the same matcher are preserved alongside ours; uninstall strips only entries pointing at our scripts.
@@ -345,10 +397,10 @@ Right now this is Claude-Code-specific because it depends on Claude Code's hook 
 
 ### `/compact` runs but no packet appears
 
-Run `claude-handoff status`. If `PreCompact hook` shows `NOT WIRED`, the install merge didn't take — re-run `./install.sh`.
+Run `claude-state status`. If `PreCompact hook` shows `NOT WIRED`, the install merge didn't take — re-run `./install.sh`.
 
 If it shows `wired` but a packet still doesn't appear:
-- Scripts always exit 0 (so nothing logs on failure). Temporarily add `set -x` near the top of `~/.claude/scripts/handoff-snapshot.sh` to see what's failing.
+- Scripts always exit 0 (so nothing logs on failure). Temporarily add `set -x` near the top of `~/.claude/claude-state/modules/handoff/snapshot.sh` to see what's failing.
 - Check `jq` is on your `PATH` — the hook runner inherits a minimal env on some platforms.
 
 ### `/resume` doesn't appear in the slash menu
@@ -367,7 +419,7 @@ You haven't triggered `PreCompact` or `SessionEnd` yet — packets only appear o
 
 ### Auto-resume installed but new sessions don't pick up prior context
 
-Some `SessionStart` injection behavior is undocumented. If `claude-handoff status` shows `mode: auto` but resumed sessions don't reference the packet, fall back to manual:
+Some `SessionStart` injection behavior is undocumented. If `claude-state status` shows `mode: auto` but resumed sessions don't reference the packet, fall back to manual:
 
 ```bash
 ./install.sh   # re-run without --auto
