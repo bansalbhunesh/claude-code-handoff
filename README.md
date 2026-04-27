@@ -152,37 +152,75 @@ claude-code-handoff status
 
 ## How it works
 
+The plugin sits between Claude Code's lifecycle events and the filesystem. Two scripts, one packet directory, five hook entries:
+
+```mermaid
+flowchart TB
+    classDef eventNode fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef scriptNode fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef storeNode fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef sessionNode fill:#f3e8ff,stroke:#9333ea,color:#581c87
+    classDef modeNode fill:#fce7f3,stroke:#db2777,color:#831843
+
+    S1["Long Claude Code session<br/>(context filling up)"]:::sessionNode
+
+    PRE["PreCompact event<br/><i>(auto or /compact)</i>"]:::eventNode
+    SE["SessionEnd event<br/><i>(/clear, logout, exit)</i>"]:::eventNode
+
+    SNAP["handoff-snapshot.sh<br/>parses transcript JSONL,<br/>writes packet"]:::scriptNode
+
+    STORE[("~/.claude/handoff/<br/>&lt;session-id&gt;.md<br/>(mode 600)")]:::storeNode
+
+    M["MANUAL MODE<br/>user types /resume"]:::modeNode
+    A["AUTO MODE<br/>SessionStart hook fires"]:::modeNode
+
+    RSM["handoff-resume.sh<br/>emits<br/>additionalContext"]:::scriptNode
+
+    S2["New session<br/>(resumed with context)"]:::sessionNode
+
+    S1 --> PRE
+    S1 --> SE
+    PRE --> SNAP
+    SE --> SNAP
+    SNAP --> STORE
+    STORE --> M
+    STORE --> A
+    A --> RSM
+    M --> S2
+    RSM --> S2
 ```
-                           ┌─────────────────────┐
-                           │   long Claude Code  │
-                           │       session       │
-                           └──────────┬──────────┘
-                                      │ PreCompact
-                                      │ (auto or /compact)
-                                      ▼
-                           ┌─────────────────────┐
-                           │ handoff-snapshot.sh │
-                           │ reads transcript,   │
-                           │ writes packet       │
-                           └──────────┬──────────┘
-                                      │
-                                      ▼
-                  ~/.claude/handoff/<session-id>.md
-                                      │
-            ┌─────────────────────────┴─────────────────────────┐
-            │                                                   │
-            ▼ manual                                            ▼ auto
-    ┌────────────────┐                          ┌──────────────────────┐
-    │ user types     │                          │ SessionStart hook    │
-    │   /resume      │                          │ runs handoff-resume  │
-    │ in new session │                          │ on next session      │
-    └────────┬───────┘                          └─────────┬────────────┘
-             │                                            │
-             ▼                                            ▼
-                ┌────────────────────────────────────────┐
-                │ Claude reads the packet and continues  │
-                │ where the prior session left off       │
-                └────────────────────────────────────────┘
+
+When does each piece fire? Here's the time-ordered story of one round trip:
+
+```mermaid
+sequenceDiagram
+    actor U as You
+    participant S1 as Old session
+    participant H as PreCompact hook
+    participant FS as handoff/&lt;sid&gt;.md
+    participant S2 as New session
+
+    Note over S1: working on a long task
+    S1->>S1: context fills up<br/>(or you type /compact)
+    S1->>H: fires PreCompact event
+    H->>FS: write structured packet
+    Note over S1: Claude Code compacts<br/>(wipes message history)
+
+    U->>S2: open new session
+
+    rect rgba(252, 231, 243, 0.4)
+    Note over U,S2: Manual mode (default)
+    U->>S2: types /resume
+    S2->>FS: reads latest packet
+    S2-->>U: "Resuming work on X.<br/>Done: A, B. Last decision: ..."
+    end
+
+    rect rgba(220, 252, 231, 0.4)
+    Note over U,S2: Auto mode (--auto)
+    Note over S2: SessionStart hook<br/>(matcher: compact / resume)
+    FS-->>S2: hook injects packet<br/>via additionalContext
+    S2-->>U: replies already aware of prior context
+    end
 ```
 
 Five hook events get wired:
