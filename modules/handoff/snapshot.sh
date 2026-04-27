@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.3.0 — snapshot
+# claude-state — handoff snapshot
 # Snapshots conversation state to ~/.claude/handoff/<session_id>.md.
 # Wired to PreCompact (auto + manual) and SessionEnd. Always exits 0
 # so it never blocks the compaction or shutdown it's observing.
 
 set -uo pipefail
-# Ensure the handoff directory and any new packet are not world-readable.
 # Packets contain verbatim user prompts and assistant prose, which may
 # include secrets the user pasted into the conversation.
 umask 077
+
+# Locate and source lib/common.sh by walking up from this script.
+__cs_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+while [ "$__cs_dir" != "/" ] && [ ! -f "$__cs_dir/lib/common.sh" ]; do
+  __cs_dir=$(dirname "$__cs_dir")
+done
+if [ ! -f "$__cs_dir/lib/common.sh" ]; then
+  echo "claude-state snapshot: cannot locate lib/common.sh" >&2
+  exit 0
+fi
+# shellcheck source=../../lib/common.sh
+. "$__cs_dir/lib/common.sh"
+# shellcheck source=../../lib/workspace.sh
+. "$__cs_dir/lib/workspace.sh"
 
 payload=$(cat)
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)
@@ -20,29 +33,22 @@ event=$(printf '%s' "$payload" | jq -r '.hook_event_name // "unknown"' 2>/dev/nu
 [ -n "$transcript" ] || exit 0
 [ -f "$transcript" ] || exit 0
 
-# Defense-in-depth: only accept simple-charset session ids as filenames,
-# and require an alphanumeric first character so pure-dot ids ("..", ".x")
-# can't produce surprising filenames. Real Claude Code uses UUIDs.
-[[ "$session_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 0
+is_valid_session_id "$session_id" || exit 0
 
-claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
-handoff_dir="$claude_dir/handoff"
-# Refuse to write through a symlinked handoff directory — guards against
-# someone replacing it with a link to a sensitive path.
+claude_dir=$(cs_claude_dir)
+handoff_dir=$(cs_handoff_dir)
+# Refuse to write through a symlinked handoff directory.
 [ -L "$handoff_dir" ] && exit 0
 mkdir -p "$handoff_dir"
 chmod 700 "$handoff_dir" 2>/dev/null || true
 
 out="$handoff_dir/$session_id.md"
-# Refuse to clobber a symlinked target.
 [ -L "$out" ] && exit 0
 
 tmp=$(mktemp "$out.tmp.XXXXXX") || exit 0
 trap 'rm -f "$tmp"' EXIT
 
 # First real user message: non-meta, non-compact-summary, non-empty.
-# Handles both string and array-of-blocks content shapes (modern Claude
-# Code uses array shape for ~75%+ of user records).
 goal=$(jq -rs '
   [ .[]
     | select(.type == "user")
@@ -59,9 +65,8 @@ goal=$(jq -rs '
   | .[0:600]
 ' "$transcript" 2>/dev/null || echo "(unknown)")
 
-# Chaining: if this transcript begins with a compact-summary record, its
-# body embeds the prior session's transcript path. Extract the UUID so
-# resume can walk back through earlier packets.
+# Chaining: walk back to the prior session id if a compact-summary is the
+# transcript's first record.
 prior_session=$(jq -rs '
   [ .[] | select(.isCompactSummary == true) | .message.content
     | if type == "string" then .
@@ -71,11 +76,9 @@ prior_session=$(jq -rs '
 ' "$transcript" 2>/dev/null \
   | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' \
   | head -1 || true)
-# Don't link to ourselves.
 [ "$prior_session" = "$session_id" ] && prior_session=""
 
-# Latest TodoWrite input — mostly empty in 4.7-era sessions but kept for
-# back-compat with workflows that still use TodoWrite.
+# Latest TodoWrite input.
 todos=$(jq -rs '
   [ .[]
     | select(.type == "assistant")
@@ -124,8 +127,7 @@ files=$(jq -rs '
 ' "$transcript" 2>/dev/null || true)
 [ -z "$files" ] && files="(no file edits in this session)"
 
-# Last 5 assistant text blocks — where decisions, dead-ends, and intent
-# live in prose. Verbatim is fine; the next session's model can read it.
+# Last 5 assistant text blocks — where decisions, dead-ends, and intent live.
 recent=$(jq -rs '
   [ .[]
     | select(.type == "assistant")
@@ -137,13 +139,23 @@ recent=$(jq -rs '
 ' "$transcript" 2>/dev/null || true)
 [ -z "$recent" ] && recent="(no assistant text yet)"
 
+# Workspace identity (M1). Empty cwd → skip, nothing to anchor against.
+workspace_id=""
+workspace_root=""
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  workspace_root=$(workspace_root_for "$cwd")
+  workspace_id=$(workspace_id_for "$workspace_root")
+fi
+
 {
   printf '# Handoff packet\n'
   printf -- '- session: %s\n' "$session_id"
   printf -- '- event: %s\n' "$event"
   printf -- '- generated: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf -- '- cwd: %s\n' "$cwd"
-  [ -n "$prior_session" ] && printf -- '- continues_from: %s\n' "$prior_session"
+  [ -n "$workspace_id" ]   && printf -- '- workspace: %s\n' "$workspace_id"
+  [ -n "$workspace_root" ] && printf -- '- workspace_root: %s\n' "$workspace_root"
+  [ -n "$prior_session" ]  && printf -- '- continues_from: %s\n' "$prior_session"
   printf '\n## Original goal\n%s\n\n## Current todos\n%s\n\n## Task tracker\n%s\n\n## Recently edited files\n%s\n\n## Recent assistant reasoning\n%s\n' \
     "$goal" "$todos" "$tasks" "$files" "$recent"
 } > "$tmp"
@@ -152,18 +164,14 @@ chmod 600 "$tmp" 2>/dev/null || true
 mv "$tmp" "$out"
 trap - EXIT
 
-# Optional auto-prune: if HANDOFF_KEEP_N is a positive integer, keep
-# only that many newest packets. Lets users put retention into their
-# environment instead of running prune manually.
+# Optional auto-prune: keep only N newest packets.
 if [ -n "${HANDOFF_KEEP_N:-}" ] && [ "$HANDOFF_KEEP_N" -eq "$HANDOFF_KEEP_N" ] 2>/dev/null && [ "$HANDOFF_KEEP_N" -ge 0 ]; then
   ls -t "$handoff_dir"/*.md 2>/dev/null | tail -n +$((HANDOFF_KEEP_N + 1)) | while IFS= read -r victim; do
     [ -f "$victim" ] && rm -f "$victim"
   done
 fi
 
-# Optional debug log: if HANDOFF_DEBUG is non-empty, append a one-line
-# status record to ~/.claude/handoff/.log. Useful when hook firings
-# look invisible (since the script always exits 0 by design).
+# Optional debug log.
 if [ -n "${HANDOFF_DEBUG:-}" ]; then
   bytes=$(wc -c <"$out" 2>/dev/null | tr -d ' ')
   printf '%s  %-12s  session=%s  bytes=%s\n' \

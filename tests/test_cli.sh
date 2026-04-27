@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034  # locals used by eval-driven asserts
-# tests/test_cli.sh — exercise the bin/claude-handoff CLI end-to-end.
+# tests/test_cli.sh — exercise the bin/claude-state CLI end-to-end.
 
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-CLI="$REPO_ROOT/bin/claude-handoff"
+CLI="$REPO_ROOT/bin/claude-state"
 
 # All CLI tests run against an isolated CLAUDE_HOME so the user's real
 # ~/.claude/ is untouched.
@@ -13,7 +13,7 @@ CLI="$REPO_ROOT/bin/claude-handoff"
 t_help_shows_usage() {
   out=$("$CLI" help 2>&1)
   assert '[ -n "$out" ]' "help should print non-empty output"
-  assert 'echo "$out" | grep -q "Usage: claude-handoff"' "help should mention Usage"
+  assert 'echo "$out" | grep -q "Usage: claude-state"' "help should mention Usage"
   assert 'echo "$out" | grep -q "list"' "help should list 'list' subcommand"
   assert 'echo "$out" | grep -q "prune"' "help should list 'prune' subcommand"
 }

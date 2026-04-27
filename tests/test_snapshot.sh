@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034  # locals used by eval-driven asserts
-# tests/test_snapshot.sh — exercises scripts/handoff-snapshot.sh.
+# tests/test_snapshot.sh — exercises modules/handoff/snapshot.sh.
 # Each test isolates itself with a fresh HOME under mktemp -d so we
 # never touch the real ~/.claude.
 
@@ -10,7 +10,7 @@ TESTS_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$TESTS_DIR/.." && pwd)
 . "$TESTS_DIR/lib.sh"
 
-SNAPSHOT="$REPO_ROOT/scripts/handoff-snapshot.sh"
+SNAPSHOT="$REPO_ROOT/modules/handoff/snapshot.sh"
 
 # Helper: synthesize the PreCompact-shaped hook payload and feed it to
 # the snapshot script under a sandboxed HOME. Echoes the HOME so the

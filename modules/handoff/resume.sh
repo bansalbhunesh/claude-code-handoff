@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff v0.3.0 — resume
+# claude-state — handoff resume
 # Reads the most relevant handoff packet and emits it as additionalContext
 # for a fresh session via the documented SessionStart hookSpecificOutput
 # shape. Wired (opt-in) to SessionStart matchers `compact` and `resume`.
@@ -7,25 +7,31 @@
 
 set -uo pipefail
 
+# Locate and source lib/common.sh.
+__cs_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+while [ "$__cs_dir" != "/" ] && [ ! -f "$__cs_dir/lib/common.sh" ]; do
+  __cs_dir=$(dirname "$__cs_dir")
+done
+if [ ! -f "$__cs_dir/lib/common.sh" ]; then
+  echo "claude-state resume: cannot locate lib/common.sh" >&2
+  exit 0
+fi
+# shellcheck source=../../lib/common.sh
+. "$__cs_dir/lib/common.sh"
+
 payload=$(cat)
-# Reject malformed/empty payloads silently — never want a half-injected
-# hook pushing the wrong session's packet into a fresh window. We use
-# `-e 'type=="object"'` rather than `jq empty` because some jq builds
-# return exit 0 on parse errors.
+# Reject malformed/empty payloads silently.
 printf '%s' "$payload" | jq -e 'type=="object"' >/dev/null 2>&1 || exit 0
 
 session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)
 source_field=$(printf '%s' "$payload" | jq -r '.source // "unknown"' 2>/dev/null)
 
-claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
-handoff_dir="$claude_dir/handoff"
+handoff_dir=$(cs_handoff_dir)
 [ -d "$handoff_dir" ] || exit 0
-# Refuse a symlinked handoff dir.
 [ -L "$handoff_dir" ] && exit 0
 
-# Prefer a packet matching this session_id (covers compact + resume of
-# the same session), otherwise fall back to the most recently modified
-# packet that is a regular file (not a symlink).
+# Prefer a packet matching this session_id; otherwise fall back to the
+# most recently modified non-symlink packet.
 target=""
 if [ -n "$session_id" ] && [ -f "$handoff_dir/$session_id.md" ] && [ ! -L "$handoff_dir/$session_id.md" ]; then
   target="$handoff_dir/$session_id.md"
@@ -44,11 +50,7 @@ fi
 
 prior_id=$(basename "$target" .md)
 
-# UTF-8-safe truncation: read the whole file with `--rawfile` (which
-# escapes correctly into JSON) and slice by codepoint inside jq. jq
-# string slicing is codepoint-aware, so this never produces invalid
-# UTF-8 in `additionalContext` even if a multibyte char would have
-# straddled the cap. The cap is in codepoints, not bytes.
+# UTF-8-safe codepoint truncation via jq's --rawfile + codepoint slicing.
 max_codepoints=16000
 
 jq -nc \
@@ -65,7 +67,7 @@ jq -nc \
   | {
       hookSpecificOutput: {
         hookEventName: "SessionStart",
-        additionalContext: ("[claude-code-handoff] Resuming after " + $src + ". Loading packet from session " + $prior + ". Treat the contents below as background context for what was being worked on; ask the user to confirm before acting on it.\n\n---\n\n" + $ctx)
+        additionalContext: ("[claude-state] Resuming after " + $src + ". Loading packet from session " + $prior + ". Treat the contents below as background context for what was being worked on; ask the user to confirm before acting on it.\n\n---\n\n" + $ctx)
       }
     }
   '

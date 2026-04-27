@@ -48,7 +48,7 @@ test_auto_install_wires_session_start() {
   # And both should point at handoff-resume.sh.
   local cmds
   cmds=$(jq -r '[.hooks.SessionStart[].hooks[].command] | unique | join(",")' "$tmp/settings.json")
-  assert 'printf "%s" "$cmds" | grep -q "handoff-resume.sh"' \
+  assert 'printf "%s" "$cmds" | grep -q "modules/handoff/resume.sh"' \
     "SessionStart hooks must invoke handoff-resume.sh"
 }
 
@@ -94,7 +94,7 @@ test_mode_toggle_preserves_third_party_session_start() {
   assert 'printf "%s" "$survivors" | grep -q "other-tool.sh"' \
     "third-party SessionStart hook must survive mode toggle"
   # And our resume hooks must be gone.
-  assert '! printf "%s" "$survivors" | grep -q "handoff-resume.sh"' \
+  assert '! printf "%s" "$survivors" | grep -q "modules/handoff/resume.sh"' \
     "our handoff-resume.sh must be removed by toggle"
 }
 
@@ -109,7 +109,7 @@ test_third_party_precompact_preserved() {
   cmds=$(jq -r '[.hooks.PreCompact[]?.hooks[]?.command] | join(",")' "$tmp/settings.json")
   assert 'printf "%s" "$cmds" | grep -q "other-precompact.sh"' \
     "third-party PreCompact hook must be preserved alongside ours"
-  assert 'printf "%s" "$cmds" | grep -q "handoff-snapshot.sh"' \
+  assert 'printf "%s" "$cmds" | grep -q "modules/handoff/snapshot.sh"' \
     "our handoff-snapshot.sh must also be installed"
 }
 
@@ -133,9 +133,9 @@ test_full_uninstall_preserves_third_party() {
   assert 'printf "%s" "$all" | grep -q "foreign-ss.sh"' \
     "uninstall must preserve foreign SessionStart"
   # And none of ours must remain.
-  assert '! printf "%s" "$all" | grep -q "handoff-snapshot.sh"' \
+  assert '! printf "%s" "$all" | grep -q "modules/handoff/snapshot.sh"' \
     "uninstall must remove handoff-snapshot.sh references"
-  assert '! printf "%s" "$all" | grep -q "handoff-resume.sh"' \
+  assert '! printf "%s" "$all" | grep -q "modules/handoff/resume.sh"' \
     "uninstall must remove handoff-resume.sh references"
 }
 

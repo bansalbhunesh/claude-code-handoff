@@ -1,0 +1,475 @@
+#!/usr/bin/env bash
+# claude-state: end-user CLI.
+# Wraps ~/.claude/handoff/ and ~/.claude/claude-state/ so users don't
+# have to know the layout. Subcommands: list, view, search, chain, edit,
+# path, status, prune, workspaces, help.
+
+set -uo pipefail
+
+CS_VERSION="0.4.0"
+
+# Locate and source lib/common.sh. Walks upward and at each level checks
+# both `lib/common.sh` (repo: bin/ sibling to lib/) and
+# `claude-state/lib/common.sh` (installed: ~/.claude/bin/ above
+# ~/.claude/claude-state/lib/).
+__cs_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+while [ "$__cs_dir" != "/" ]; do
+  if [ -f "$__cs_dir/lib/common.sh" ]; then break; fi
+  if [ -f "$__cs_dir/claude-state/lib/common.sh" ]; then
+    __cs_dir="$__cs_dir/claude-state"
+    break
+  fi
+  __cs_dir=$(dirname "$__cs_dir")
+done
+if [ ! -f "$__cs_dir/lib/common.sh" ]; then
+  echo "claude-state: cannot locate lib/common.sh from $0" >&2
+  exit 1
+fi
+# shellcheck source=../lib/common.sh
+. "$__cs_dir/lib/common.sh"
+# shellcheck source=../lib/workspace.sh
+. "$__cs_dir/lib/workspace.sh"
+
+claude_dir=$(cs_claude_dir)
+handoff_dir=$(cs_handoff_dir)
+settings="$claude_dir/settings.json"
+
+# Module install paths. In a fresh v0.4 install, scripts live under
+# ~/.claude/claude-state/modules/handoff/. In a v0.3 install, they were
+# at ~/.claude/scripts/. status() checks both so an upgraded user can
+# see what's installed.
+mod_root="$claude_dir/claude-state"
+snap_v04="$mod_root/modules/handoff/snapshot.sh"
+resume_v04="$mod_root/modules/handoff/resume.sh"
+snap_v03="$claude_dir/scripts/handoff-snapshot.sh"
+resume_v03="$claude_dir/scripts/handoff-resume.sh"
+
+# ----- subcommands -----
+
+cmd_list() {
+  if [ ! -d "$handoff_dir" ]; then
+    echo "No handoff directory at $handoff_dir."
+    echo "Run install.sh from the claude-state repo first."
+    return 1
+  fi
+  local count=0
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    local sid age mtime header_extra=""
+    sid=$(basename "$f" .md)
+    mtime=$(file_mtime "$f")
+    age=$(human_age "$mtime")
+    if grep -q '^- continues_from:' "$f" 2>/dev/null; then
+      local prior
+      prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+      header_extra="  ↳ continues from $prior"
+    fi
+    printf '%-40s  %8s ago%s\n' "$sid" "$age" "$header_extra"
+    count=$((count + 1))
+  done < <(list_packets_by_mtime "$handoff_dir")
+  if [ "$count" -eq 0 ]; then
+    echo "No packets in $handoff_dir."
+    return 0
+  fi
+  echo
+  echo "$count packet(s). Use 'claude-state view <session-id>' to read one."
+}
+
+cmd_view() {
+  local target=""
+  if [ -n "${1:-}" ]; then
+    target="$handoff_dir/$1.md"
+    if [ ! -f "$target" ]; then
+      err "no packet for session '$1' at $target"
+      return 2
+    fi
+  else
+    target=$(list_packets_by_mtime "$handoff_dir" | head -1)
+    if [ -z "$target" ]; then
+      err "no packets in $handoff_dir"
+      return 2
+    fi
+  fi
+  if [ -t 1 ] && command -v less >/dev/null 2>&1; then
+    less -R "$target"
+  else
+    cat "$target"
+  fi
+}
+
+cmd_path() {
+  printf '%s\n' "$handoff_dir"
+}
+
+cmd_search() {
+  local query="${1:-}"
+  if [ -z "$query" ]; then
+    err "search: missing query (usage: claude-state search <pattern>)"
+    return 2
+  fi
+  [ -d "$handoff_dir" ] || { err "no handoff dir at $handoff_dir"; return 1; }
+  local hits=0 f sid mtime age
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if grep -i -q -- "$query" "$f" 2>/dev/null; then
+      sid=$(basename "$f" .md)
+      mtime=$(file_mtime "$f")
+      age=$(human_age "$mtime")
+      printf '\n=== %s  (%s ago) ===\n' "$sid" "$age"
+      grep -i -n --color=auto -B1 -A1 -- "$query" "$f" 2>/dev/null | head -20
+      hits=$((hits + 1))
+    fi
+  done < <(list_packets_by_mtime "$handoff_dir")
+  if [ "$hits" -eq 0 ]; then
+    echo "No matches for '$query'."
+    return 1
+  fi
+  printf '\n%d packet(s) matched.\n' "$hits"
+}
+
+# Recursively walk continues_from, bounded by max_depth.
+walk_chain() {
+  local sid="$1" depth="$2" max_depth=10
+  [ "$depth" -ge "$max_depth" ] && { echo "(chain depth limit reached)"; return; }
+  local f="$handoff_dir/$sid.md"
+  if [ ! -f "$f" ]; then
+    echo "(packet $sid not found — chain ends here)"
+    return
+  fi
+  printf '\n──── %s ────\n' "$sid"
+  cat "$f"
+  local prior
+  prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+  if [ -n "$prior" ]; then
+    walk_chain "$prior" $((depth + 1))
+  fi
+}
+
+cmd_chain() {
+  local sid="${1:-}"
+  if [ -z "$sid" ]; then
+    sid=$(list_packets_by_mtime "$handoff_dir" | head -1)
+    [ -z "$sid" ] && { err "no packets in $handoff_dir"; return 1; }
+    sid=$(basename "$sid" .md)
+  fi
+  walk_chain "$sid" 0
+}
+
+cmd_edit() {
+  local sid="${1:-}"
+  if [ -z "$sid" ]; then
+    err "edit: missing session id (usage: claude-state edit <session-id>)"
+    return 2
+  fi
+  local target="$handoff_dir/$sid.md"
+  if [ ! -f "$target" ]; then
+    err "no packet for session '$sid' at $target"
+    return 2
+  fi
+  local editor="${VISUAL:-${EDITOR:-vi}}"
+  "$editor" "$target"
+}
+
+cmd_status() {
+  local cmd_file="$claude_dir/commands/resume.md"
+
+  echo "claude-state status"
+  echo "  version (cli):      $CS_VERSION"
+
+  if command -v jq >/dev/null 2>&1; then
+    local jqv
+    jqv=$(jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
+    echo "  jq:                 $jqv"
+  else
+    echo "  jq:                 NOT INSTALLED (required by snapshot+resume scripts)"
+  fi
+
+  echo "  claude_dir:         $claude_dir"
+  echo "  handoff dir:        $([ -d "$handoff_dir" ] && printf 'present (mode %s)' "$(file_mode "$handoff_dir")" || echo 'MISSING')"
+
+  # Prefer v0.4 layout; fall back to v0.3 if found, with a deprecation note.
+  if [ -x "$snap_v04" ]; then
+    echo "  snapshot script:    installed ($snap_v04)"
+  elif [ -x "$snap_v03" ]; then
+    echo "  snapshot script:    installed at v0.3 path ($snap_v03) — re-run install.sh to migrate"
+  else
+    echo "  snapshot script:    MISSING"
+  fi
+  if [ -x "$resume_v04" ]; then
+    echo "  resume script:      installed ($resume_v04)"
+  elif [ -x "$resume_v03" ]; then
+    echo "  resume script:      installed at v0.3 path ($resume_v03) — re-run install.sh to migrate"
+  else
+    echo "  resume script:      MISSING"
+  fi
+  echo "  /resume command:    $([ -f "$cmd_file" ] && echo 'installed' || echo 'MISSING')"
+
+  if [ -f "$settings" ]; then
+    if command -v jq >/dev/null 2>&1; then
+      local has_pre has_end has_start auto_mode
+      has_pre=$(jq -r 'any((.hooks.PreCompact // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh$")))' "$settings" 2>/dev/null)
+      has_end=$(jq -r 'any((.hooks.SessionEnd // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh$")))' "$settings" 2>/dev/null)
+      has_start=$(jq -r 'any((.hooks.SessionStart // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-resume|modules/handoff/resume)\\.sh$")))' "$settings" 2>/dev/null)
+      [ "$has_start" = "true" ] && auto_mode="auto" || auto_mode="manual"
+      echo "  PreCompact hook:    $([ "$has_pre" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
+      echo "  SessionEnd hook:    $([ "$has_end" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
+      echo "  SessionStart hook:  $([ "$has_start" = "true" ] && echo 'wired (auto-resume)' || echo 'not wired (manual mode)')"
+      echo "  mode:               $auto_mode"
+    else
+      echo "  hooks status:       (jq not installed, can't inspect $settings)"
+    fi
+  else
+    echo "  settings.json:      MISSING ($settings)"
+  fi
+
+  local pcount=0
+  if [ -d "$handoff_dir" ]; then
+    pcount=$(find "$handoff_dir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  echo "  packets stored:     $pcount"
+}
+
+cmd_prune() {
+  local mode="" arg=""
+  case "${1:-}" in
+    --older-than) mode="older"; arg="${2:-}"; ;;
+    --keep)       mode="keep";  arg="${2:-}"; ;;
+    "")           err "prune: requires --older-than <Nd> or --keep <N>"; return 2 ;;
+    *)            err "prune: unknown flag $1"; return 2 ;;
+  esac
+  [ -n "$arg" ] || { err "prune: missing argument for $1"; return 2; }
+  [ -d "$handoff_dir" ] || { err "no handoff dir at $handoff_dir"; return 1; }
+
+  local victims=() f
+  if [ "$mode" = "older" ]; then
+    case "$arg" in
+      *d) local n="${arg%d}"
+          [[ "$n" =~ ^[0-9]+$ ]] || { err "prune: invalid duration $arg"; return 2; }
+          while IFS= read -r -d '' f; do
+            victims+=("$f")
+          done < <(find "$handoff_dir" -maxdepth 1 -type f -name '*.md' -mtime +"$n" -print0 2>/dev/null)
+          ;;
+      *)  err "prune: --older-than only accepts <N>d (days)"; return 2 ;;
+    esac
+  else
+    [[ "$arg" =~ ^[0-9]+$ ]] || { err "prune: --keep needs a number"; return 2; }
+    local i=0
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      i=$((i + 1))
+      [ "$i" -le "$arg" ] && continue
+      victims+=("$f")
+    done < <(list_packets_by_mtime "$handoff_dir")
+  fi
+
+  if [ "${#victims[@]}" -eq 0 ]; then
+    echo "Nothing to prune."
+    return 0
+  fi
+
+  echo "Will delete ${#victims[@]} packet(s):"
+  for f in "${victims[@]}"; do printf '  %s\n' "$(basename "$f" .md)"; done
+  printf 'Proceed? [y/N] '
+  read -r ans
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "Aborted."; return 0 ;;
+  esac
+  for f in "${victims[@]}"; do rm -f "$f"; done
+  echo "Deleted ${#victims[@]} packet(s)."
+}
+
+# Workspace-aware: newest packet whose `- workspace: <id>` matches the
+# resolved id for $cwd. Echoes the path; returns 1 if no match.
+resume_pick_workspace() {
+  local cwd="$1"
+  local target_ws
+  target_ws=$(workspace_id_for_cwd "$cwd") || return 1
+  [ -n "$target_ws" ] || return 1
+  # Match against the packet's `workspace:` field, or — for v0.3 packets
+  # that predate the field — backfill from the `cwd:` field the same way
+  # `workspaces rebuild` does.
+  local f packet_ws packet_cwd
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    packet_ws=$(awk '/^- workspace: / {print $3; exit}' "$f")
+    if [ -z "$packet_ws" ]; then
+      packet_cwd=$(awk '/^- cwd: / {sub(/^- cwd: /, ""); print; exit}' "$f")
+      if [ -n "$packet_cwd" ]; then
+        packet_ws=$(workspace_id_for_cwd "$packet_cwd" 2>/dev/null) || packet_ws=""
+      fi
+    fi
+    if [ "$packet_ws" = "$target_ws" ]; then
+      printf '%s\n' "$f"
+      return 0
+    fi
+  done < <(list_packets_by_mtime "$handoff_dir")
+  return 1
+}
+
+# Score packets by distinct-keyword hits (case-insensitive, fixed-string).
+# Tiebreak by recency (mtime), since list_packets_by_mtime already yields
+# newest first. Echoes the winning path, or returns 1 if no packet hits.
+resume_pick_keywords() {
+  local keywords="$1"
+  [ -n "$keywords" ] || return 1
+  # shellcheck disable=SC2206  # intentional word splitting on keyword string
+  local kws=( $keywords )
+  local f best_score=0 best_path="" score kw
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    score=0
+    for kw in "${kws[@]}"; do
+      [ -z "$kw" ] && continue
+      if grep -qi -F -- "$kw" "$f" 2>/dev/null; then
+        score=$((score + 1))
+      fi
+    done
+    if [ "$score" -gt "$best_score" ]; then
+      best_score="$score"
+      best_path="$f"
+    fi
+  done < <(list_packets_by_mtime "$handoff_dir")
+  [ "$best_score" -gt 0 ] || return 1
+  printf '%s\n' "$best_path"
+}
+
+cmd_resume() {
+  local mode="auto" target="" keywords="" positional=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --here)         mode="here";    shift ;;
+      --keywords)     mode="keywords"; shift; keywords="${1:-}"; shift || true ;;
+      -h|--help)
+        cat <<USAGE
+claude-state resume — smart resume into a prior session's packet.
+
+Usage:
+  claude-state resume                       Workspace-aware default. Picks the
+                                            newest packet whose workspace matches
+                                            the current cwd; falls back to the
+                                            global newest if no match.
+  claude-state resume <session-id>          Specific packet by id.
+  claude-state resume --here                Require workspace match. Errors out
+                                            if cwd is not in a known workspace.
+  claude-state resume --keywords "auth bug" Score packets by keyword hits and
+                                            print the winner.
+  claude-state resume <free text>           Same as --keywords if input is not
+                                            a known session id.
+USAGE
+        return 0 ;;
+      *)              if [ -z "$positional" ]; then positional="$1"
+                      else                          positional="$positional $1"
+                      fi
+                      shift ;;
+    esac
+  done
+
+  # Resolve mode + target from positional input.
+  if [ "$mode" = "auto" ] && [ -n "$positional" ]; then
+    # If positional is a known session id, treat as specific.
+    local first_word="${positional%% *}"
+    if is_valid_session_id "$first_word" && [ -f "$handoff_dir/$first_word.md" ] && [ ! -L "$handoff_dir/$first_word.md" ]; then
+      target="$handoff_dir/$first_word.md"
+    else
+      mode="keywords"
+      keywords="$positional"
+    fi
+  fi
+
+  if [ -z "$target" ]; then
+    case "$mode" in
+      here)
+        target=$(resume_pick_workspace "$(pwd)") || target=""
+        if [ -z "$target" ]; then
+          err "resume --here: no packet for current workspace ($(workspace_id_for_cwd "$(pwd)" 2>/dev/null))"
+          return 1
+        fi
+        ;;
+      keywords)
+        target=$(resume_pick_keywords "$keywords") || target=""
+        if [ -z "$target" ]; then
+          err "resume: no packets matched keywords '$keywords'"
+          return 1
+        fi
+        ;;
+      auto|*)
+        target=$(resume_pick_workspace "$(pwd)") || target=""
+        if [ -z "$target" ]; then
+          target=$(list_packets_by_mtime "$handoff_dir" | head -1)
+        fi
+        ;;
+    esac
+  fi
+
+  [ -n "$target" ]    || { err "resume: no packets found in $handoff_dir"; return 1; }
+  [ -f "$target" ]    || { err "resume: target packet missing: $target"; return 1; }
+  [ ! -L "$target" ] || { err "resume: refusing symlinked packet: $target"; return 1; }
+
+  local sid
+  sid=$(basename "$target" .md)
+  printf -- '── claude-state resume: %s ──\n' "$sid"
+  cat "$target"
+}
+
+cmd_workspaces() {
+  exec "$__cs_dir/modules/workspaces/workspaces.sh" "$@"
+}
+
+cmd_help() {
+  cat <<USAGE
+claude-state $CS_VERSION — persistent state for Claude Code (handoff packets, workspaces).
+
+Usage: claude-state <command> [args]
+
+Commands:
+  list                       List packets, newest first.
+  view [<session-id>]        View a packet (default: most recent).
+  resume [<id|keywords>] [--here] [--keywords "..."]
+                             Smart resume: workspace-aware by default.
+  workspaces ...             Manage workspaces (list, show, rebuild, rename).
+  search <pattern>           Find packets containing <pattern> (case-insensitive grep).
+  chain [<session-id>]       Walk the continues_from chain backwards (default: latest).
+  edit <session-id>          Open a packet in \$EDITOR for redaction.
+  path                       Print the handoff directory path.
+  status                     Show install state, mode, packet count.
+  prune --older-than <N>d    Delete packets older than N days.
+  prune --keep <N>           Keep N most recent packets, delete the rest.
+  help                       Show this help.
+
+Environment:
+  CLAUDE_HOME       Override the default ~/.claude location.
+  HANDOFF_KEEP_N    When set on snapshot script (in your shell or hook
+                    env), keep only N newest packets after each write.
+  HANDOFF_DEBUG     When non-empty on the snapshot script, append a
+                    line per fire to ~/.claude/handoff/.log.
+
+Examples:
+  claude-state list
+  claude-state view
+  claude-state view 300b907c-d452-4064-ac2c-ee2b9c98213f
+  claude-state search "auth bug"
+  claude-state chain
+  claude-state edit 300b907c-d452-4064-ac2c-ee2b9c98213f
+  claude-state prune --older-than 30d
+  claude-state prune --keep 20
+USAGE
+}
+
+# ----- dispatch -----
+
+case "${1:-}" in
+  list)            shift; cmd_list "$@" ;;
+  view)            shift; cmd_view "$@" ;;
+  resume)          shift; cmd_resume "$@" ;;
+  workspaces|ws)   shift; cmd_workspaces "$@" ;;
+  search)          shift; cmd_search "$@" ;;
+  chain)           shift; cmd_chain "$@" ;;
+  edit)            shift; cmd_edit "$@" ;;
+  path)            shift; cmd_path "$@" ;;
+  status)          shift; cmd_status "$@" ;;
+  prune)           shift; cmd_prune "$@" ;;
+  help|-h|--help)  cmd_help ;;
+  "")              cmd_help; exit 2 ;;
+  *)               err "unknown command: $1"; cmd_help >&2; exit 2 ;;
+esac
