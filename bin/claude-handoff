@@ -12,14 +12,15 @@ settings="$claude_dir/settings.json"
 
 # ----- helpers -----
 
-# Cross-platform stat (BSD vs GNU): mtime in epoch.
+# Cross-platform stat (BSD vs GNU): try -c (GNU/Linux) first because
+# `stat -f` on Linux is *filesystem* stat, not format-string — the BSD-
+# first ordering would silently return filesystem info on Linux.
 file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
 }
 
-# Cross-platform stat: permission bits.
 file_mode() {
-  stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"
+  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
 }
 
 # Human-readable age (e.g. "3d 4h").

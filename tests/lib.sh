@@ -79,10 +79,13 @@ run() {
 }
 
 # Cross-platform stat for the low-12-bits permission octal of a file.
-# macOS / BSD: stat -f %Lp ; GNU: stat -c %a.
+# GNU stat (Linux): -c %a. BSD stat (macOS): -f %Lp.
+# IMPORTANT: try -c first. On Linux, `stat -f` runs *filesystem* stat and
+# succeeds with garbage; on macOS, `stat -c` fails cleanly so we fall
+# through. The reverse order silently produces fs-info on Linux.
 file_mode() {
   local f="$1"
-  stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f" 2>/dev/null
+  stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f" 2>/dev/null
 }
 
 # Best-effort symlink creation, used by tests that probe symlink refusal.
