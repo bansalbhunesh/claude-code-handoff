@@ -1,5 +1,7 @@
 # claude-code-handoff
 
+[![CI](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml/badge.svg)](https://github.com/bansalbhunesh/claude-code-handoff/actions/workflows/ci.yml)
+
 Survive Claude Code's auto-compaction and session crashes by snapshotting state to a structured "handoff packet" you can resume from.
 
 ## The problem
@@ -33,7 +35,7 @@ Two ways to consume the packet:
 ## Install
 
 ```bash
-git clone https://github.com/<you>/claude-code-handoff.git
+git clone https://github.com/bansalbhunesh/claude-code-handoff.git
 cd claude-code-handoff
 ./install.sh           # manual mode (recommended for first-time)
 # or:
@@ -43,8 +45,9 @@ cd claude-code-handoff
 The installer:
 
 - Copies `handoff-snapshot.sh` and `handoff-resume.sh` to `~/.claude/scripts/`
+- Copies `claude-handoff` (the management CLI) to `~/.claude/bin/`
 - Copies `resume.md` to `~/.claude/commands/`
-- Creates `~/.claude/handoff/`
+- Creates `~/.claude/handoff/` (mode 700)
 - Backs up your existing `~/.claude/settings.json` and merges the hooks block (preserves any other hooks you already have, including third-party hooks on the same matcher)
 
 It is idempotent — safe to run multiple times. To switch modes, re-run with or without `--auto`: running without the flag actively *removes* any previously-installed `SessionStart` auto-resume entries (mode toggling works in both directions). To remove everything, run `./uninstall.sh`.
@@ -55,12 +58,28 @@ It is idempotent — safe to run multiple times. To switch modes, re-run with or
    ```
    PreCompact [...handoff-snapshot.sh] completed successfully
    ```
-2. List packets:
+2. Inspect packets:
    ```bash
-   ls -t ~/.claude/handoff/
+   ~/.claude/bin/claude-handoff list
    ```
-   The newest one should be your current session id.
+   The newest entry should be your current session id.
 3. Open a new session and type `/resume`. Claude should locate the latest packet and summarize it in 4–6 lines.
+
+## Daily use
+
+The `claude-handoff` CLI wraps `~/.claude/handoff/` so you don't have to know the directory layout. Add `~/.claude/bin` to your `PATH` for convenience, or invoke it by full path.
+
+```bash
+claude-handoff list                    # all packets, newest first
+claude-handoff view                    # most recent packet
+claude-handoff view <session-id>       # specific packet
+claude-handoff status                  # install state, mode, jq version, packet count
+claude-handoff path                    # print the handoff dir path
+claude-handoff prune --older-than 30d  # delete packets older than 30 days
+claude-handoff prune --keep 20         # keep only the 20 most recent
+```
+
+`prune` is interactive — it lists what it will delete and asks for confirmation before deleting anything.
 
 ## How it works
 
@@ -103,6 +122,28 @@ The plugin does **no** automatic rotation — packets accumulate indefinitely. D
 - **Auto-resume relies on undocumented behavior.** `SessionStart` hooks documenting `hookSpecificOutput.additionalContext` is documented; the size limit, the way the injected text is presented to the model, and the version-availability of the field are not. The plugin caps injection at 16 KB defensively. If a future Claude Code release changes the mechanism, fall back to manual mode (`./uninstall.sh && ./install.sh`).
 - **Goal heuristic is best-effort.** Filters out compact summaries (via the JSONL `isCompactSummary` flag), command meta (`isMeta` flag, plus `<`/`⏺` text-prefix fallback), and empty messages. Sessions whose entire first stretch is slash-commands will report `(unknown)` — that's accurate, not a bug.
 - **`SessionEnd` doesn't distinguish crash from clean exit.** It does fire on `clear` / `logout` / `prompt_input_exit`, but not on hard kills (SIGKILL) or harness crashes — those silently lose the packet.
+
+## Troubleshooting
+
+**`/compact` runs but no packet appears in `~/.claude/handoff/`.**
+
+Run `claude-handoff status` and check that `PreCompact hook: wired`. If it shows `NOT WIRED`, the install merge didn't take — re-run `./install.sh`. If it shows `wired` but a packet still doesn't appear, the script is silently no-opping; check whether `jq` is on your `PATH` (the hook runner inherits a minimal env on some platforms). The script always exits 0 by design (so it never blocks compaction), so failures are invisible — temporarily add `set -x` near the top of `~/.claude/scripts/handoff-snapshot.sh` and tail `~/.claude/logs/` (or wherever your shell's stderr goes) to see what's happening.
+
+**`/resume` doesn't appear in the slash menu.**
+
+Claude Code re-scans `~/.claude/commands/` automatically — no restart needed. Confirm the file exists with `ls -la ~/.claude/commands/resume.md`. If it does and `/resume` still isn't recognized, check the frontmatter is intact (the file must start with `---`).
+
+**`/resume` works but Claude says "no handoff file exists."**
+
+You haven't triggered any of `PreCompact` / `SessionEnd` yet — packets are only written on those events. Force one with `/compact` in any active session.
+
+**Auto-resume installed but new sessions don't pick up prior context.**
+
+Some `SessionStart` hook injection behavior is undocumented (size limits, presentation to the model). If `claude-handoff status` shows `mode: auto` but resumed sessions don't reference the packet, fall back to manual mode by re-running `./install.sh` (no flag), and rely on typing `/resume` instead.
+
+**`install.sh` says "jq >= 1.6 is required."**
+
+Update with `brew install jq` (macOS) or your package manager. On older Linux distros (Debian 10, etc.), use `pip install jq` or grab a static binary from <https://jqlang.github.io/jq/download/>.
 
 ## Uninstall
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff: resume
+# claude-code-handoff v0.2.0 — resume
 # Reads the most relevant handoff packet and emits it as additionalContext
 # for a fresh session via the documented SessionStart hookSpecificOutput
 # shape. Wired (opt-in) to SessionStart matchers `compact` and `resume`.

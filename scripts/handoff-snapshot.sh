@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff: snapshot
+# claude-code-handoff v0.2.0 — snapshot
 # Snapshots conversation state to ~/.claude/handoff/<session_id>.md.
 # Wired to PreCompact (auto + manual) and SessionEnd. Always exits 0
 # so it never blocks the compaction or shutdown it's observing.

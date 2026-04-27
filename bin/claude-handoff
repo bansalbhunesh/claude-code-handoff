@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# claude-code-handoff: end-user CLI
+# Wraps the ~/.claude/handoff/ directory so users don't have to know
+# its layout. Subcommands: list, view, path, status, prune, help.
+
+set -uo pipefail
+
+HANDOFF_VERSION="0.2.0"
+claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
+handoff_dir="$claude_dir/handoff"
+settings="$claude_dir/settings.json"
+
+# ----- helpers -----
+
+# Cross-platform stat (BSD vs GNU): mtime in epoch.
+file_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
+}
+
+# Cross-platform stat: permission bits.
+file_mode() {
+  stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"
+}
+
+# Human-readable age (e.g. "3d 4h").
+human_age() {
+  local now=$(date +%s)
+  local age=$((now - $1))
+  local d=$((age / 86400))
+  local h=$(((age % 86400) / 3600))
+  local m=$(((age % 3600) / 60))
+  if [ "$d" -gt 0 ]; then printf '%dd %dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf '%dh %dm' "$h" "$m"
+  else printf '%dm' "$m"
+  fi
+}
+
+# Print to stderr.
+err() { printf '%s\n' "$*" >&2; }
+
+# Sort packets by mtime descending (newest first), printing one per line.
+list_packets_by_mtime() {
+  [ -d "$handoff_dir" ] || return 0
+  local f m
+  for f in "$handoff_dir"/*.md; do
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    m=$(file_mtime "$f")
+    [ -n "$m" ] || continue
+    printf '%s\t%s\n' "$m" "$f"
+  done | sort -rn | cut -f2-
+}
+
+# ----- subcommands -----
+
+cmd_list() {
+  if [ ! -d "$handoff_dir" ]; then
+    echo "No handoff directory at $handoff_dir."
+    echo "Run install.sh from the claude-code-handoff repo first."
+    return 1
+  fi
+  local count=0
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    local sid age mtime header_extra=""
+    sid=$(basename "$f" .md)
+    mtime=$(file_mtime "$f")
+    age=$(human_age "$mtime")
+    # Pull continues_from line if present, for tree-style display hint.
+    if grep -q '^- continues_from:' "$f" 2>/dev/null; then
+      local prior
+      prior=$(awk '/^- continues_from:/ {print $3; exit}' "$f")
+      header_extra="  ↳ continues from $prior"
+    fi
+    printf '%-40s  %8s ago%s\n' "$sid" "$age" "$header_extra"
+    count=$((count + 1))
+  done < <(list_packets_by_mtime)
+  if [ "$count" -eq 0 ]; then
+    echo "No packets in $handoff_dir."
+    return 0
+  fi
+  echo
+  echo "$count packet(s). Use 'claude-handoff view <session-id>' to read one."
+}
+
+cmd_view() {
+  local target=""
+  if [ -n "${1:-}" ]; then
+    target="$handoff_dir/$1.md"
+    if [ ! -f "$target" ]; then
+      err "no packet for session '$1' at $target"
+      return 2
+    fi
+  else
+    target=$(list_packets_by_mtime | head -1)
+    if [ -z "$target" ]; then
+      err "no packets in $handoff_dir"
+      return 2
+    fi
+  fi
+  if [ -t 1 ] && command -v less >/dev/null 2>&1; then
+    less -R "$target"
+  else
+    cat "$target"
+  fi
+}
+
+cmd_path() {
+  printf '%s\n' "$handoff_dir"
+}
+
+cmd_status() {
+  local snap="$claude_dir/scripts/handoff-snapshot.sh"
+  local rsm="$claude_dir/scripts/handoff-resume.sh"
+  local cmd_file="$claude_dir/commands/resume.md"
+
+  echo "claude-code-handoff status"
+  echo "  version (cli):      $HANDOFF_VERSION"
+
+  if command -v jq >/dev/null 2>&1; then
+    local jqv
+    jqv=$(jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
+    echo "  jq:                 $jqv"
+  else
+    echo "  jq:                 NOT INSTALLED (required by snapshot+resume scripts)"
+  fi
+
+  echo "  claude_dir:         $claude_dir"
+  echo "  handoff dir:        $([ -d "$handoff_dir" ] && printf 'present (mode %s)' "$(file_mode "$handoff_dir")" || echo 'MISSING')"
+  echo "  snapshot script:    $([ -x "$snap" ] && echo 'installed' || echo 'MISSING')"
+  echo "  resume script:      $([ -x "$rsm" ] && echo 'installed' || echo 'MISSING')"
+  echo "  /resume command:    $([ -f "$cmd_file" ] && echo 'installed' || echo 'MISSING')"
+
+  if [ -f "$settings" ]; then
+    if command -v jq >/dev/null 2>&1; then
+      local has_pre has_end has_start auto_mode
+      has_pre=$(jq -r 'any((.hooks.PreCompact // [])[]; (.hooks // []) | any((.command // "") | endswith("/handoff-snapshot.sh")))' "$settings" 2>/dev/null)
+      has_end=$(jq -r 'any((.hooks.SessionEnd // [])[]; (.hooks // []) | any((.command // "") | endswith("/handoff-snapshot.sh")))' "$settings" 2>/dev/null)
+      has_start=$(jq -r 'any((.hooks.SessionStart // [])[]; (.hooks // []) | any((.command // "") | endswith("/handoff-resume.sh")))' "$settings" 2>/dev/null)
+      [ "$has_start" = "true" ] && auto_mode="auto" || auto_mode="manual"
+      echo "  PreCompact hook:    $([ "$has_pre" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
+      echo "  SessionEnd hook:    $([ "$has_end" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
+      echo "  SessionStart hook:  $([ "$has_start" = "true" ] && echo 'wired (auto-resume)' || echo 'not wired (manual mode)')"
+      echo "  mode:               $auto_mode"
+    else
+      echo "  hooks status:       (jq not installed, can't inspect $settings)"
+    fi
+  else
+    echo "  settings.json:      MISSING ($settings)"
+  fi
+
+  local pcount=0
+  if [ -d "$handoff_dir" ]; then
+    pcount=$(find "$handoff_dir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  echo "  packets stored:     $pcount"
+}
+
+cmd_prune() {
+  local mode="" arg=""
+  case "${1:-}" in
+    --older-than) mode="older"; arg="${2:-}"; ;;
+    --keep)       mode="keep";  arg="${2:-}"; ;;
+    "")           err "prune: requires --older-than <Nd> or --keep <N>"; return 2 ;;
+    *)            err "prune: unknown flag $1"; return 2 ;;
+  esac
+  [ -n "$arg" ] || { err "prune: missing argument for $1"; return 2; }
+  [ -d "$handoff_dir" ] || { err "no handoff dir at $handoff_dir"; return 1; }
+
+  local victims=() f
+  if [ "$mode" = "older" ]; then
+    case "$arg" in
+      *d) local n="${arg%d}"
+          [[ "$n" =~ ^[0-9]+$ ]] || { err "prune: invalid duration $arg"; return 2; }
+          while IFS= read -r -d '' f; do
+            victims+=("$f")
+          done < <(find "$handoff_dir" -maxdepth 1 -type f -name '*.md' -mtime +"$n" -print0 2>/dev/null)
+          ;;
+      *)  err "prune: --older-than only accepts <N>d (days)"; return 2 ;;
+    esac
+  else
+    [[ "$arg" =~ ^[0-9]+$ ]] || { err "prune: --keep needs a number"; return 2; }
+    local i=0
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      i=$((i + 1))
+      [ "$i" -le "$arg" ] && continue
+      victims+=("$f")
+    done < <(list_packets_by_mtime)
+  fi
+
+  if [ "${#victims[@]}" -eq 0 ]; then
+    echo "Nothing to prune."
+    return 0
+  fi
+
+  echo "Will delete ${#victims[@]} packet(s):"
+  for f in "${victims[@]}"; do printf '  %s\n' "$(basename "$f" .md)"; done
+  printf 'Proceed? [y/N] '
+  read -r ans
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "Aborted."; return 0 ;;
+  esac
+  for f in "${victims[@]}"; do rm -f "$f"; done
+  echo "Deleted ${#victims[@]} packet(s)."
+}
+
+cmd_help() {
+  cat <<USAGE
+claude-handoff $HANDOFF_VERSION — manage Claude Code session handoff packets.
+
+Usage: claude-handoff <command> [args]
+
+Commands:
+  list                       List packets, newest first.
+  view [<session-id>]        View a packet (default: most recent).
+  path                       Print the handoff directory path.
+  status                     Show install state, mode, packet count.
+  prune --older-than <N>d    Delete packets older than N days.
+  prune --keep <N>           Keep N most recent packets, delete the rest.
+  help                       Show this help.
+
+Environment:
+  CLAUDE_HOME    Override the default ~/.claude location.
+
+Examples:
+  claude-handoff list
+  claude-handoff view
+  claude-handoff view 300b907c-d452-4064-ac2c-ee2b9c98213f
+  claude-handoff prune --older-than 30d
+  claude-handoff prune --keep 20
+USAGE
+}
+
+# ----- dispatch -----
+
+case "${1:-}" in
+  list)            shift; cmd_list "$@" ;;
+  view)            shift; cmd_view "$@" ;;
+  path)            shift; cmd_path "$@" ;;
+  status)          shift; cmd_status "$@" ;;
+  prune)           shift; cmd_prune "$@" ;;
+  help|-h|--help)  cmd_help ;;
+  "")              cmd_help; exit 2 ;;
+  *)               err "unknown command: $1"; cmd_help >&2; exit 2 ;;
+esac

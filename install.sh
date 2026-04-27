@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff: installer
+# claude-code-handoff v0.2.0 — installer
 # Installs claude-code-handoff into ~/.claude/.
 # Idempotent: safe to run multiple times. Backs up settings.json on
 # successful merge. Pass --auto to also wire SessionStart auto-resume,
@@ -49,12 +49,12 @@ case "$jq_version" in
     ;;
 esac
 
-mkdir -p "$claude_dir/scripts" "$claude_dir/commands" "$claude_dir/handoff"
+mkdir -p "$claude_dir/scripts" "$claude_dir/commands" "$claude_dir/handoff" "$claude_dir/bin"
 chmod 700 "$claude_dir/handoff" 2>/dev/null || true
 
 # Use install(1)-style replace: rm-then-cp, so foreign-owned existing
 # scripts don't fail under set -e.
-for src_rel in scripts/handoff-snapshot.sh scripts/handoff-resume.sh; do
+for src_rel in scripts/handoff-snapshot.sh scripts/handoff-resume.sh bin/claude-handoff; do
   dst="$claude_dir/$src_rel"
   rm -f "$dst"
   cp "$repo_dir/$src_rel" "$dst"
@@ -132,6 +132,7 @@ Installed claude-code-handoff (mode: $mode).
   scripts:  $claude_dir/scripts/handoff-snapshot.sh
             $claude_dir/scripts/handoff-resume.sh
   command:  $claude_dir/commands/resume.md
+  cli:      $claude_dir/bin/claude-handoff   (run --help; add to \$PATH for convenience)
   packets:  $claude_dir/handoff/   (mode 700; packets are mode 600)
   hooks:    merged into $settings
 

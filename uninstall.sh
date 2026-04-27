@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-code-handoff: uninstaller
+# claude-code-handoff v0.2.0 — uninstaller
 # Removes claude-code-handoff. Strips both manual-mode hooks
 # (PreCompact, SessionEnd → handoff-snapshot.sh) and auto-mode hooks
 # (SessionStart → handoff-resume.sh) from settings.json. Leaves the
@@ -24,6 +24,7 @@ fi
 rm -f "$claude_dir/scripts/handoff-snapshot.sh"
 rm -f "$claude_dir/scripts/handoff-resume.sh"
 rm -f "$claude_dir/commands/resume.md"
+rm -f "$claude_dir/bin/claude-handoff"
 
 settings="$claude_dir/settings.json"
 if [ -f "$settings" ]; then
