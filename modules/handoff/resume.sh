@@ -2,7 +2,7 @@
 # claude-state — handoff resume
 # Reads the most relevant handoff packet and emits it as additionalContext
 # for a fresh session via the documented SessionStart hookSpecificOutput
-# shape. Wired (opt-in) to SessionStart matchers `compact` and `resume`.
+# shape. Wired (opt-in) to startup, resume, compact, clear, and fork.
 # Always exits 0 so it never blocks session startup.
 
 set -uo pipefail
@@ -40,6 +40,8 @@ fi
 if [ -z "$target" ]; then
   target=$(handoff_pick_workspace "$cwd") || exit 0
 fi
-ctx=$(handoff_context "$target" "$cwd" "$source_field" | cs_jq -r .) || exit 0
-printf '%s' "$ctx" | cs_jq -Rs '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:.}}'
+# Preserve the JSON string end-to-end. Older jq versions can replace split
+# UTF-8 characters during raw slurp, inflating an already-budgeted excerpt.
+handoff_context "$target" "$cwd" "$source_field" |
+  cs_jq '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:.}}'
 exit 0
