@@ -281,7 +281,7 @@ test_resume_keywords_picks_highest_score() {
   assert 'grep -q "rendering pipeline" "$home/.claude/handoff/kw_c.md"' \
     "kw_c packet must contain the embedded text 'rendering pipeline'"
   local out
-  out=$(CLAUDE_HOME="$home/.claude" "$CLI" resume --keywords "auth middleware")
+  out=$(CLAUDE_HOME="$home/.claude" "$CLI" resume --all-projects --keywords "auth middleware")
   # kw_a matches "auth" + "middleware" via "middleware-adjacent" (score 2),
   # kw_b matches both (score 2), kw_c matches neither (0). Tiebreak between
   # kw_a and kw_b is recency: kw_b was snapshotted later → wins.
@@ -309,7 +309,7 @@ test_resume_default_falls_back_to_global_newest() {
   invoke_snapshot "$home" "globalnew" "$tx" "$home/known"
   # Resume from a cwd whose workspace has NO packets — must fall back to global newest.
   local out
-  out=$(cd "$home/unknown" && CLAUDE_HOME="$home/.claude" "$CLI" resume 2>&1)
+  out=$(cd "$home/unknown" && CLAUDE_HOME="$home/.claude" "$CLI" resume --all-projects 2>&1)
   assert 'echo "$out" | grep -q "claude-state resume: globalnew"' \
     "resume default must fall back to global newest when cwd workspace has no packets"
 }
@@ -343,7 +343,7 @@ run "resume --here: finds workspace packet"       test_resume_here_finds_workspa
 run "resume --here: errors on unknown workspace"  test_resume_here_errors_when_unknown_workspace
 run "resume --keywords: picks highest score"      test_resume_keywords_picks_highest_score
 run "resume --keywords: no hits errors"           test_resume_keywords_no_hits_errors
-run "resume default: falls back to global newest" test_resume_default_falls_back_to_global_newest
+run "resume --all-projects: explicit global fallback" test_resume_default_falls_back_to_global_newest
 run "resume <id>: selects specific packet"        test_resume_specific_session_id
 
 printf '# pass=%s fail=%s\n' "$PASS" "$FAIL"

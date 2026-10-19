@@ -101,8 +101,8 @@ extract_blocks() {
       if (length($0) > 0) print
     }
   ' \
-  | jq -Rs 'split("\n\n") | map(select(. != ""))' 2>/dev/null \
-  || jq -nc '[]'
+  | cs_jq -Rs 'split("\n\n") | map(select(. != ""))' 2>/dev/null \
+  || cs_jq -nc '[]'
 }
 
 # Block extractor: read the packet's "Recent assistant reasoning" section
@@ -132,7 +132,7 @@ extract_blocks_simple() {
   # produces a clean split (the empty trailing element is filtered out
   # by `select(length > 0)` below).
   printf '%s\n\n---\n\n%s' "$kept" "$dropped" \
-  | jq -Rs '
+  | cs_jq -Rs '
       split("\n\n---\n\n")
       | map(
           gsub("^\\*\\*\\[score [^\\]]*\\]\\*\\*\\n\\n"; "")
@@ -179,7 +179,7 @@ cmd_signal_main() {
   local blocks
   blocks=$(extract_blocks_simple "$packet")
   local block_count
-  block_count=$(printf '%s' "$blocks" | jq 'length')
+  block_count=$(printf '%s' "$blocks" | cs_jq 'length')
   if [ "$block_count" -eq 0 ]; then
     err "signal: no reasoning blocks found in $packet"
     return 1
@@ -195,9 +195,9 @@ cmd_signal_main() {
 
   if [ "$mode" = "explain" ]; then
     local kept_count dropped_count thr
-    kept_count=$(printf '%s' "$result" | jq -r '.kept | length')
-    dropped_count=$(printf '%s' "$result" | jq -r '.dropped | length')
-    thr=$(printf '%s' "$result" | jq -r '.threshold')
+    kept_count=$(printf '%s' "$result" | cs_jq -r '.kept | length')
+    dropped_count=$(printf '%s' "$result" | cs_jq -r '.dropped | length')
+    thr=$(printf '%s' "$result" | cs_jq -r '.threshold')
     printf 'signal explain — packet: %s\n' "$packet" >&2
     printf 'threshold=%s   kept=%s   dropped=%s   total=%s\n\n' "$thr" "$kept_count" "$dropped_count" "$block_count" >&2
     printf '%s\n' "$result" | signal_explain

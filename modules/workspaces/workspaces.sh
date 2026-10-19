@@ -56,7 +56,7 @@ build_index_json() {
 
   local alias_map="{}"
   if [ -f "$index_file" ]; then
-    alias_map=$(jq -c '(.workspaces // {}) | with_entries(.value = (.value.alias // null))' "$index_file" 2>/dev/null) \
+    alias_map=$(cs_jq -c '(.workspaces // {}) | with_entries(.value = (.value.alias // null))' "$index_file" 2>/dev/null) \
       || alias_map="{}"
     [ -z "$alias_map" ] && alias_map="{}"
   fi
@@ -78,7 +78,7 @@ build_index_json() {
       fi
     fi
     [ -n "$ws" ] || continue
-    entries+=$(jq -nc \
+    entries+=$(cs_jq -nc \
       --arg sid "$sid" --arg ws "$ws" --arg root "$root" --arg g "$generated" \
       '{sid:$sid, ws:$ws, root:$root, generated:$g}')$'\n'
   done
@@ -88,7 +88,7 @@ build_index_json() {
     return 0
   fi
 
-  printf '%s' "$entries" | jq -s --argjson aliases "$alias_map" '
+  printf '%s' "$entries" | cs_jq -s --argjson aliases "$alias_map" '
     group_by(.ws)
     | map({
         key: (.[0].ws),
@@ -113,7 +113,7 @@ write_index() {
   tmp=$(mktemp "$index_file.tmp.XXXXXX") || return 1
   content=$(build_index_json) || { rm -f "$tmp"; return 1; }
   printf '%s' "$content" > "$tmp"
-  if jq -e . "$tmp" >/dev/null 2>&1; then
+  if cs_jq -e . "$tmp" >/dev/null 2>&1; then
     mv "$tmp" "$index_file"
   else
     rm -f "$tmp"
@@ -125,7 +125,7 @@ write_index() {
 cmd_list() {
   write_index >/dev/null || return 1
   local count
-  count=$(jq -r '.workspaces | length' "$index_file" 2>/dev/null) || count=0
+  count=$(cs_jq -r '.workspaces | length' "$index_file" 2>/dev/null) || count=0
   if [ "$count" -eq 0 ]; then
     echo "No workspaces. Run a session in a project, or 'claude-state workspaces rebuild'."
     return 0
@@ -136,7 +136,7 @@ cmd_list() {
   # as IFS, Git Bash on Windows doesn't honor \x1F (US) either, and
   # whitespace IFS like \t collapses adjacent delimiters and shifts
   # fields when alias is empty. Default IFS + line-per-field is portable.
-  jq -r '
+  cs_jq -r '
     .workspaces
     | to_entries
     | sort_by(.value.last_seen)
@@ -171,7 +171,7 @@ cmd_show() {
   # canonical id instead. Lets `claude-state ws show <alias>` work after
   # a `rename`, which is the obvious user expectation.
   local resolved
-  resolved=$(jq -r --arg n "$name" '
+  resolved=$(cs_jq -r --arg n "$name" '
     if .workspaces[$n] then $n
     else (.workspaces | to_entries[] | select(.value.alias == $n) | .key) // empty
     end
@@ -180,15 +180,15 @@ cmd_show() {
     name="$resolved"
   fi
   local exists
-  exists=$(jq -r --arg w "$name" '.workspaces[$w] // empty | length' "$index_file" 2>/dev/null) || exists=""
+  exists=$(cs_jq -r --arg w "$name" '.workspaces[$w] // empty | length' "$index_file" 2>/dev/null) || exists=""
   if [ -z "$exists" ]; then
     err "workspaces show: no workspace '$name'. Use 'claude-state workspaces' to list."
     return 1
   fi
   printf 'Workspace: %s\n' "$name"
-  jq -r --arg w "$name" '.workspaces[$w] | "  root:  \(.root // "?")\n  alias: \(.alias // "(none)")\n  first: \(.first_seen)\n  last:  \(.last_seen)\n  count: \(.packet_count)\n"' "$index_file"
+  cs_jq -r --arg w "$name" '.workspaces[$w] | "  root:  \(.root // "?")\n  alias: \(.alias // "(none)")\n  first: \(.first_seen)\n  last:  \(.last_seen)\n  count: \(.packet_count)\n"' "$index_file"
   echo "Packets:"
-  jq -r --arg w "$name" '.workspaces[$w].sessions[]' "$index_file" \
+  cs_jq -r --arg w "$name" '.workspaces[$w].sessions[]' "$index_file" \
   | while IFS= read -r sid; do
       pf="$handoff_dir/$sid.md"
       if [ -f "$pf" ]; then
@@ -204,7 +204,7 @@ cmd_show() {
 cmd_rebuild() {
   write_index || return 1
   local count
-  count=$(jq -r '.workspaces | length' "$index_file" 2>/dev/null) || count=0
+  count=$(cs_jq -r '.workspaces | length' "$index_file" 2>/dev/null) || count=0
   echo "Rebuilt index for $count workspace(s) at $index_file."
 }
 
@@ -216,15 +216,15 @@ cmd_rename() {
   fi
   write_index >/dev/null || return 1
   local exists
-  exists=$(jq -r --arg w "$name" '.workspaces[$w] // empty | length' "$index_file" 2>/dev/null) || exists=""
+  exists=$(cs_jq -r --arg w "$name" '.workspaces[$w] // empty | length' "$index_file" 2>/dev/null) || exists=""
   if [ -z "$exists" ]; then
     err "workspaces rename: no workspace '$name'"
     return 1
   fi
   local tmp
   tmp=$(mktemp "$index_file.tmp.XXXXXX") || return 1
-  jq --arg w "$name" --arg a "$alias_to" '.workspaces[$w].alias = $a' "$index_file" > "$tmp"
-  if jq -e . "$tmp" >/dev/null 2>&1; then
+  cs_jq --arg w "$name" --arg a "$alias_to" '.workspaces[$w].alias = $a' "$index_file" > "$tmp"
+  if cs_jq -e . "$tmp" >/dev/null 2>&1; then
     mv "$tmp" "$index_file"
     echo "Renamed: $name → $alias_to"
   else

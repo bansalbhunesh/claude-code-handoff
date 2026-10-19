@@ -20,10 +20,42 @@ __mem_lib_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # Sanitization scheme: replace `/` with `-` (matches the harness's
 # observed format, e.g. /Users/ankur → -Users-ankur).
 memory_dir() {
-  local cwd="${1:-$(pwd)}"
-  local sanitized
-  sanitized=$(printf '%s' "$cwd" | tr '/' '-')
-  printf '%s/projects/%s/memory' "$(cs_claude_dir)" "$sanitized"
+  local cwd="${1:-$(pwd)}" root common config setting configured="" project_key native
+  config=$(cs_claude_dir)
+  root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || root=$(cd "$cwd" && pwd -P) || return 1
+  # Respect normal user/project/local overrides without executing any config.
+  for setting in "$config/settings.json" "$root/.claude/settings.json" "$root/.claude/settings.local.json"; do
+    [ -f "$setting" ] || continue
+    local value
+    value=$(cs_jq -er '.autoMemoryDirectory | select(type=="string" and length>0)' "$setting" 2>/dev/null) || value=""
+    [ -z "$value" ] || configured="$value"
+  done
+  if [ -n "$configured" ]; then
+    case "$configured" in
+      \~/*) printf '%s/%s' "$HOME" "${configured#\~/}" ;;
+      /*|[A-Za-z]:[\\/]*) printf '%s' "$configured" ;;
+      *) err 'memory: autoMemoryDirectory must be absolute; use CS_MEMORY_DIR for an explicit location'; return 1 ;;
+    esac
+    return 0
+  fi
+  if [ -n "${CLAUDE_CODE_PROJECT_DIR_NAME:-}" ]; then
+    project_key="$CLAUDE_CODE_PROJECT_DIR_NAME"
+    case "$project_key" in .|..|*/*|*\\*) err 'memory: invalid CLAUDE_CODE_PROJECT_DIR_NAME'; return 1 ;; esac
+  else
+    # Worktree handoffs remain separate; native auto memory is shared by repo.
+    common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=""
+    if [ -n "$common" ] && [ "$(basename "$common")" = '.git' ]; then root=$(dirname "$common"); fi
+    native="$root"
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) native=$(cygpath -am "$root") || return 1 ;; esac
+    project_key=$(printf '%s' "$native" | LC_ALL=C sed 's/[^a-zA-Z0-9]/-/g')
+    # Long-path hashing is a host implementation detail: never invent a store.
+    [ "${#project_key}" -le 200 ] || { err 'memory: long project path; set CS_MEMORY_DIR to the directory shown by /memory'; return 1; }
+  fi
+  local candidate="$config/projects/$project_key/memory"
+  # Discovery is intentionally read-only. An explicit binding is required to
+  # create a store; this avoids silently writing to an unused guessed directory.
+  [ -d "$candidate" ] || { err 'memory: native store not found; copy its path from /memory into CS_MEMORY_DIR'; return 1; }
+  printf '%s' "$candidate"
 }
 
 # Honors CS_MEMORY_DIR override (used by tests and by users with a
@@ -125,7 +157,7 @@ memory_to_json() {
     created_session=$(memory_field "$f" "originSessionId")
   fi
   superseded_by=$(memory_field "$f" "superseded_by")
-  jq -nc \
+  cs_jq -nc \
     --arg name "$name" \
     --arg type "$type" \
     --arg description "$description" \
@@ -195,10 +227,24 @@ memory_rebuild_index() {
   local dir="${1:-$(cs_memory_dir)}"
   [ -d "$dir" ] || { mkdir -p "$dir"; }
   local index="$dir/MEMORY.md"
+  [ ! -L "$dir" ] && [ ! -L "$index" ] || { err 'memory: refusing symlinked index'; return 1; }
+  # Refuse malformed markers rather than discarding the rest of a user's notes.
+  if [ -f "$index" ] && ! awk '
+    /^<!-- claude-state:start -->$/ {if (inside) bad=1; inside=1}
+    /^<!-- claude-state:end -->$/ {if (!inside) bad=1; inside=0}
+    END {exit (bad || inside) ? 1 : 0}
+  ' "$index"; then
+    err 'memory: unbalanced generated markers in MEMORY.md; original file preserved'
+    return 1
+  fi
   local tmp
   tmp=$(mktemp "$index.tmp.XXXXXX") || return 1
   {
-    [ -f "$dir/MEMORY.md.header" ] && cat "$dir/MEMORY.md.header"
+    if [ -f "$index" ]; then
+      awk '/^<!-- claude-state:start -->$/ {skip=1; next} /^<!-- claude-state:end -->$/ {skip=0; next} !skip' "$index"
+    fi
+    printf '<!-- claude-state:start -->\n'
+    if [ -f "$dir/MEMORY.md.header" ]; then cat "$dir/MEMORY.md.header"; printf '\n'; fi
     local f name description type state
     while IFS= read -r f; do
       [ -z "$f" ] && continue
@@ -216,7 +262,8 @@ memory_rebuild_index() {
       type=$(awk -v k=type "/^---/{c++; if(c==2)exit; next} c==1 && /^[a-zA-Z_]+:/ {p=index(\$0,\":\"); kk=substr(\$0,1,p-1); gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", kk); if(kk==k){val=substr(\$0,p+1); gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", val); print val; exit}}" "$f")
       printf "%s\t%s\n" "${type:-z-untyped}" "$f"
     ' _ {} | sort | cut -f2-)
-    [ -f "$dir/MEMORY.md.footer" ] && cat "$dir/MEMORY.md.footer"
+    if [ -f "$dir/MEMORY.md.footer" ]; then cat "$dir/MEMORY.md.footer"; printf '\n'; fi
+    printf '<!-- claude-state:end -->\n'
   } > "$tmp"
   mv "$tmp" "$index"
 }

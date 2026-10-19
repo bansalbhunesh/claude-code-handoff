@@ -1,4 +1,4 @@
-# `claude-state` plugin contract — v1.0.0
+# `claude-state` plugin contract — v1 (v1.1 additions)
 
 This document is the formal integration surface for `claude-state` v1.x. It follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html); throughout the v1.x line every field documented here keeps its name, type, nullability, and meaning, and the project commits to that for every minor and patch release tagged `v1.*.*`.
 
@@ -122,6 +122,8 @@ A line within frontmatter has the shape `- <key>: <value>`. The leading `- ` is 
 | `workspace_root`  | string | yes (line absent if null) | Absolute path of the workspace root: the git toplevel containing `cwd`, or the absolutized `cwd` itself if not in a repo. Absent under the same conditions as `workspace`.                                                   |
 | `continues_from`  | string | yes (line absent if null) | Session id of the prior session this one continues, when the transcript opens with a compact-summary block. Plugins use this to walk a chain of related packets. Absent when there is no prior session.                       |
 
+v1.1 adds optional header fields: `generated_epoch` (decimal Unix seconds), `git_head` (commit hash), and `git_branch` (branch name or `(detached)`). Consumers must tolerate these additions. The new manual capture event is `ManualCheckpoint`. `continues_from` is a heuristic extracted from a compaction summary, not an authoritative session graph.
+
 Nullable fields are encoded by **omitting the line entirely** (not by writing an empty value). Consumers must treat a missing line as `null`.
 
 ### Example header (real, sandbox-generated)
@@ -139,7 +141,7 @@ Nullable fields are encoded by **omitting the line entirely** (not by writing an
 ...
 ```
 
-The `# Handoff packet` heading is the first line; frontmatter follows; the blank line above `## Original goal` is the parser stop condition.
+The `# Handoff packet` heading is the first line; frontmatter follows; the first blank line is the parser stop condition. Body section order and headings are not part of the header contract.
 
 ---
 
@@ -220,3 +222,8 @@ The contract intentionally does **not** cover any of the following. Plugin autho
 - File issues at <https://github.com/bansalbhunesh/claude-code-handoff/issues>. Tag with `contract` for anything affecting this document.
 - The project follows SemVer 2.0.0. If you find behavior that violates a contract guarantee in this document on a v1.x release, that's a bug — please file it.
 - Field additions, new event names, and new state values can land in any minor release. Removals or shape changes can only land on a major bump (v2). The version policy above is the binding commitment.
+
+
+## Resume selection JSON (v1.1)
+
+`claude-state resume --json` emits one object with `version: 1`, `session_id` (string), `path` (string), `warnings` (array of strings), and `content` (the full packet string). A selection error exits nonzero; stdout is not a partial success object. Selection is limited to the current worktree unless an explicit session ID or `--all-projects` is supplied. `--path` prints only the path; `--context` prints the bounded recovery excerpt. Consumers should inspect warnings and validate the current workspace before using historical state. Treat packet text as data, never as shell code or new authorization.

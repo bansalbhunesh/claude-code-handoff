@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-state v0.4.0 — installer
+# claude-state v1.1.0 — installer
 # Installs claude-state into ~/.claude/. Idempotent: safe to run multiple
 # times. Backs up settings.json on successful merge. Pass --auto to also
 # wire SessionStart auto-resume.
@@ -15,10 +15,9 @@ usage() {
   cat <<USAGE
 Usage: $0 [--auto] [-h|--help]
 
-  --auto      Also install SessionStart auto-resume hooks (compact + resume
-              matchers). Auto-resume is opt-in because some of its underlying
-              behavior (size limits, presentation to the model) is undocumented.
-              Without this flag, only the manual /resume slash command is wired,
+  --auto      Also install SessionStart recovery for startup, resume, compact,
+              clear and fork. Recovery injects a bounded historical excerpt.
+              Without this flag, only the manual /handoff-resume command is wired,
               and any previously-installed SessionStart auto-resume entries are
               removed (mode toggling).
 
@@ -36,7 +35,9 @@ esac
 [ "$#" -gt 0 ] && { echo "unexpected extra arguments: $*" >&2; usage >&2; exit 2; }
 
 repo_dir="$(cd "$(dirname "$0")" && pwd)"
-claude_dir="${CLAUDE_HOME:-$HOME/.claude}"
+# shellcheck source=lib/common.sh
+. "$repo_dir/lib/common.sh"
+claude_dir="${CLAUDE_CONFIG_DIR:-${CLAUDE_HOME:-$HOME/.claude}}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq is required but not installed. Try 'brew install jq' or your package manager." >&2
@@ -44,7 +45,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # We use jq's `//=` operator (jq 1.6+).
-jq_version=$(jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
+jq_version=$(cs_jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
 case "$jq_version" in
   1.[0-5]|1.[0-5].*)
     echo "error: jq >= 1.6 is required (found $jq_version). Update jq and re-run." >&2
@@ -52,18 +53,31 @@ case "$jq_version" in
     ;;
 esac
 
+# Reject filesystem aliases before copying or removing managed files.
+case "$claude_dir" in \~/*) claude_dir="$HOME/${claude_dir#\~/}" ;; esac
+[ ! -L "$claude_dir" ] || { echo 'error: symlinked Claude config directory' >&2; exit 1; }
+mkdir -p "$claude_dir"
+claude_dir=$(cd "$claude_dir" && pwd -P)
+for managed in claude-state claude-state/lib claude-state/modules claude-state/modules/handoff claude-state/modules/workspaces claude-state/modules/signal claude-state/modules/memory bin commands skills skills/session-handoff skills/session-handoff/references scripts handoff; do
+  [ ! -L "$claude_dir/$managed" ] || { echo "error: symlinked managed directory: $managed" >&2; exit 1; }
+done
+if [ -f "$claude_dir/settings.json" ]; then
+  cs_jq -e 'type=="object" and ((.hooks // {})|type=="object")' "$claude_dir/settings.json" >/dev/null || exit 1
+fi
+
 # Layout under $claude_dir:
 #   bin/claude-state                              — entry point on PATH
 #   bin/claude-handoff                            — deprecation shim
 #   claude-state/lib/common.sh                    — shared helpers
 #   claude-state/modules/handoff/snapshot.sh      — pre-compact / session-end hook
 #   claude-state/modules/handoff/resume.sh        — session-start hook
-#   commands/resume.md                            — /resume slash command
+#   commands/handoff-resume.md                    — /handoff-resume command
 #   handoff/                                      — packet data (mode 700; created lazily)
 mkdir -p \
   "$claude_dir/bin" \
   "$claude_dir/commands" \
   "$claude_dir/handoff" \
+  "$claude_dir/skills/session-handoff/references" \
   "$claude_dir/claude-state/lib" \
   "$claude_dir/claude-state/modules/handoff" \
   "$claude_dir/claude-state/modules/workspaces" \
@@ -90,7 +104,20 @@ install_file "$repo_dir/modules/signal/signal.sh"             "$claude_dir/claud
 install_file "$repo_dir/modules/memory/memory.sh"             "$claude_dir/claude-state/modules/memory/memory.sh"         755
 install_file "$repo_dir/bin/claude-state"                     "$claude_dir/bin/claude-state"                              755
 install_file "$repo_dir/bin/claude-handoff"                   "$claude_dir/bin/claude-handoff"                            755
-install_file "$repo_dir/commands/resume.md"                   "$claude_dir/commands/resume.md"                            644
+install_file "$repo_dir/commands/handoff-resume.md" "$claude_dir/commands/handoff-resume.md" 644
+for helper in handoff.sh transcript.jq redact.jq; do
+  install_file "$repo_dir/lib/$helper" "$claude_dir/claude-state/lib/$helper" 644
+done
+install_file "$repo_dir/skills/session-handoff/SKILL.md" "$claude_dir/skills/session-handoff/SKILL.md" 644
+install_file "$repo_dir/skills/session-handoff/LICENSE" "$claude_dir/skills/session-handoff/LICENSE" 644
+install_file "$repo_dir/skills/session-handoff/references/claude-state.md" "$claude_dir/skills/session-handoff/references/claude-state.md" 644
+if [ -f "$claude_dir/commands/resume.md" ]; then
+  if cmp -s "$repo_dir/assets/legacy-resume.md" "$claude_dir/commands/resume.md"; then
+    rm -f "$claude_dir/commands/resume.md"
+  else
+    echo 'Preserved custom commands/resume.md; it may override Claude Code native /resume.' >&2
+  fi
+fi
 
 # Best-effort cleanup of v0.3 layout. We delete the script files only;
 # we leave $claude_dir/scripts/ in place if it still has unrelated files.
@@ -104,8 +131,11 @@ settings="$claude_dir/settings.json"
 tmp=$(mktemp "$settings.tmp.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
-snap_cmd='$HOME/.claude/claude-state/modules/handoff/snapshot.sh'
-resume_cmd='$HOME/.claude/claude-state/modules/handoff/resume.sh'
+# Shell-quote installed paths, including spaces and apostrophes. Pin the store
+# in the hook so custom config locations also work in a fresh shell.
+quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+snap_cmd="env CLAUDE_CONFIG_DIR=$(quote "$claude_dir") bash $(quote "$claude_dir/claude-state/modules/handoff/snapshot.sh")"
+resume_cmd="env CLAUDE_CONFIG_DIR=$(quote "$claude_dir") bash $(quote "$claude_dir/claude-state/modules/handoff/resume.sh")"
 
 # Inline the strip regex inside the jq script (rather than passing via
 # `--arg strip "$strip_pattern"`). Git Bash on Windows performs MSYS
@@ -114,7 +144,7 @@ resume_cmd='$HOME/.claude/claude-state/modules/handoff/resume.sh'
 # hook tails and v0.4 mode-toggle silently kept SessionStart entries.
 # uninstall.sh has always used the inline form and never had this bug.
 
-jq --arg snap "$snap_cmd" \
+cs_jq --arg snap "$snap_cmd" \
    --arg resume "$resume_cmd" \
    --argjson auto "$auto" '
   def hook_entry($cmd): {type: "command", command: $cmd};
@@ -142,7 +172,7 @@ jq --arg snap "$snap_cmd" \
   def strip_ours(arr):
     arr
     | coalesce_matchers
-    | map(.hooks |= map(select((.command // "") | test("(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\\.sh$") | not)))
+    | map(.hooks |= map(select((.command // "") | test("(^|/)(scripts/handoff-(snapshot|resume)|claude-state/modules/handoff/(snapshot|resume))\\.sh[\u0027\"]?$") | not)))
     | map(select((.hooks // []) | length > 0));
 
   def add_or_create($matcher; $cmd):
@@ -172,7 +202,10 @@ jq --arg snap "$snap_cmd" \
       .hooks.SessionStart = (
         strip_ours(.hooks.SessionStart // [])
         | add_or_create("compact"; $resume)
-        | add_or_create("resume"; $resume))
+        | add_or_create("resume"; $resume)
+        | add_or_create("startup"; $resume)
+        | add_or_create("clear"; $resume)
+        | add_or_create("fork"; $resume))
     else
       .hooks.SessionStart = (strip_ours(.hooks.SessionStart // []))
     end
@@ -181,7 +214,7 @@ jq --arg snap "$snap_cmd" \
   | if (.hooks.SessionEnd   | length) == 0 then del(.hooks.SessionEnd)   else . end
 ' "$settings" > "$tmp"
 
-jq -e . "$tmp" >/dev/null || { echo "error: merged settings.json is not valid JSON; aborting" >&2; exit 1; }
+cs_jq -e . "$tmp" >/dev/null || { echo "error: merged settings.json is not valid JSON; aborting" >&2; exit 1; }
 
 # Backup AFTER successful merge so failed runs don't spam .backup-* files.
 if [ -f "$settings" ] && ! cmp -s "$tmp" "$settings"; then
@@ -197,11 +230,11 @@ mode="manual"
 
 cat <<EOF
 
-Installed claude-state v0.4.0 (mode: $mode).
+Installed claude-state v1.1.0 (mode: $mode).
   modules:  $claude_dir/claude-state/modules/handoff/snapshot.sh
             $claude_dir/claude-state/modules/handoff/resume.sh
   lib:      $claude_dir/claude-state/lib/common.sh
-  command:  $claude_dir/commands/resume.md
+  command:  $claude_dir/commands/handoff-resume.md
   cli:      $claude_dir/bin/claude-state           (run --help; add to \$PATH for convenience)
             $claude_dir/bin/claude-handoff         (deprecation shim — forwards to claude-state)
   packets:  $claude_dir/handoff/                   (mode 700; packets are mode 600)
@@ -211,12 +244,12 @@ Verify:
   1. In a Claude Code session, run /compact. Status line should show
      'PreCompact [...modules/handoff/snapshot.sh] completed successfully'.
   2. ls -t $claude_dir/handoff/   # newest packet on top
-  3. In a fresh session, type /resume — Claude should summarize the packet.
+  3. In a fresh session, type /handoff-resume — Claude should summarize the packet.
 EOF
 if [ "$auto" -eq 1 ]; then
   cat <<EOF
   4. Auto-resume only: open a fresh session after compaction. Claude should
-     reference the prior session's state without you typing /resume.
+     reference the prior session's state without you typing /handoff-resume.
 EOF
 fi
 

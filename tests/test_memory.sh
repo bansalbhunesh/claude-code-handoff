@@ -206,9 +206,9 @@ test_rebuild_index_honors_header_footer() {
   printf '# Custom header\n\n' > "$mdir/MEMORY.md.header"
   printf '\n# Custom footer\n' > "$mdir/MEMORY.md.footer"
   echo "body" | run_mem "$mdir" add --name h1 --type x --description d --content -
-  assert 'head -1 "$mdir/MEMORY.md" | grep -q "Custom header"' \
+  assert 'grep -v "^<!-- claude-state:\|^$" "$mdir/MEMORY.md" | head -1 | grep -q "Custom header"' \
     "MEMORY.md.header must be prepended"
-  assert 'tail -1 "$mdir/MEMORY.md" | grep -q "Custom footer"' \
+  assert 'grep -v "^<!-- claude-state:\|^$" "$mdir/MEMORY.md" | tail -1 | grep -q "Custom footer"' \
     "MEMORY.md.footer must be appended"
 }
 
@@ -231,6 +231,22 @@ EOF
   assert 'echo "$out" | grep -q "good"' "good memory must still be listed"
 }
 
+
+test_rebuild_index_preserves_malformed_markers() {
+  local mdir rc=0
+  mdir=$(tmpdir)
+  printf 'Manual intro\n<!-- claude-state:start -->\nKeep this unfinished note\n' > "$mdir/MEMORY.md"
+  cp "$mdir/MEMORY.md" "$mdir/expected"
+  run_mem "$mdir" rebuild-index >/dev/null 2>&1 || rc=$?
+  assert '[ "$rc" -ne 0 ]' 'malformed marker must produce an actionable failure'
+  assert 'cmp -s "$mdir/MEMORY.md" "$mdir/expected"' 'unmatched marker must not erase notes'
+  printf 'Manual note without a final newline' > "$mdir/MEMORY.md"
+  run_mem "$mdir" rebuild-index >/dev/null
+  cp "$mdir/MEMORY.md" "$mdir/expected"
+  run_mem "$mdir" rebuild-index >/dev/null
+  assert 'cmp -s "$mdir/MEMORY.md" "$mdir/expected"' 'notes without a final newline must survive repeat rebuilds'
+}
+
 # --- driver ---
 
 run "memory: add writes frontmatter"            test_add_writes_frontmatter
@@ -250,6 +266,7 @@ run "memory: query --json filters"              test_query_json_filters
 run "memory: legacy originSessionId surfaces"   test_query_json_legacy_origin_session_id
 run "memory: rebuild-index idempotent"          test_rebuild_index_idempotent
 run "memory: rebuild-index header/footer"       test_rebuild_index_honors_header_footer
+run "memory: malformed markers preserve notes" test_rebuild_index_preserves_malformed_markers
 run "memory: malformed frontmatter no crash"    test_malformed_frontmatter_does_not_crash_list
 
 printf '# pass=%s fail=%s\n' "$PASS" "$FAIL"

@@ -2,15 +2,48 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "compact",
+        "matcher": "startup",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/resume.sh" }
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/claude-state/modules/handoff/resume.sh\""
+          }
         ]
       },
       {
         "matcher": "resume",
         "hooks": [
-          { "type": "command", "command": "$HOME/.claude/claude-state/modules/handoff/resume.sh" }
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/claude-state/modules/handoff/resume.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/claude-state/modules/handoff/resume.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/claude-state/modules/handoff/resume.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/claude-state/modules/handoff/resume.sh\""
+          }
         ]
       }
     ]

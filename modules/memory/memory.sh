@@ -22,7 +22,8 @@ fi
 . "$__cs_dir/lib/memory.sh"
 
 # Pre-resolve once so subcommands share state.
-mem_dir=$(cs_memory_dir)
+mem_dir=$(cs_memory_dir) || exit 1
+[ -n "$mem_dir" ] && [ ! -L "$mem_dir" ] || { err 'memory: refusing empty or symlinked memory directory'; exit 1; }
 
 # Resolve a name to an absolute file path.
 mem_path_for() {
@@ -44,10 +45,10 @@ mem_emit_json_contract() {
     local row
     row=$(memory_to_json "$f")
     if [ -n "$filter_type" ]; then
-      printf '%s' "$row" | jq -e --arg t "$filter_type" '.type == $t' >/dev/null || continue
+      printf '%s' "$row" | cs_jq -e --arg t "$filter_type" '.type == $t' >/dev/null || continue
     fi
     if [ -n "$filter_state" ]; then
-      printf '%s' "$row" | jq -e --arg s "$filter_state" '.state == $s' >/dev/null || continue
+      printf '%s' "$row" | cs_jq -e --arg s "$filter_state" '.state == $s' >/dev/null || continue
     fi
     if [ -n "$filter_keyword" ]; then
       grep -qi -- "$filter_keyword" "$f" 2>/dev/null || continue
@@ -57,7 +58,7 @@ mem_emit_json_contract() {
   if [ -z "$entries" ]; then
     printf '{"version":1,"memories":[]}\n'
   else
-    printf '%s' "$entries" | jq -s '{version: 1, memories: .}'
+    printf '%s' "$entries" | cs_jq -s '{version: 1, memories: .}'
   fi
 }
 
@@ -112,7 +113,7 @@ cmd_get() {
   f=$(mem_path_for "$name") || return 2
   [ -f "$f" ] || { err "memory get: no memory '$name' at $f"; return 1; }
   if [ "$json" -eq 1 ]; then
-    memory_to_json "$f" | jq .
+    memory_to_json "$f" | cs_jq .
   else
     cat "$f"
   fi
