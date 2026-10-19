@@ -46,7 +46,38 @@ human_age() {
 
 # Resolve the Claude Code home directory. Honors CLAUDE_HOME override.
 cs_claude_dir() {
-  printf '%s' "${CLAUDE_HOME:-$HOME/.claude}"
+  printf '%s' "${CLAUDE_CONFIG_DIR:-${CLAUDE_HOME:-$HOME/.claude}}"
+}
+
+# Native jq.exe writes CRLF unless binary mode is enabled. Unix jq needs no flag.
+cs_jq() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # MSYS guesses incorrectly for quoted paths and --arg values. Convert
+      # actual file operands ourselves, leaving JSON/filter/variable data alone.
+      local args=() filter=0 literal=0 arg
+      while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        if [ "$literal" -eq 1 ]; then args+=("$arg"); continue; fi
+        case "$arg" in
+          --arg|--argjson)
+            [ "$#" -ge 2 ] || return 2
+            args+=("$arg" "$1" "$2"); shift 2 ;;
+          --rawfile|--slurpfile|--argfile)
+            [ "$#" -ge 2 ] || return 2
+            args+=("$arg" "$1" "$(cygpath -m "$2")"); shift 2 ;;
+          -f|--from-file)
+            [ "$#" -ge 1 ] || return 2
+            args+=("$arg" "$(cygpath -m "$1")"); shift; filter=1 ;;
+          --args|--jsonargs) args+=("$arg"); literal=1 ;;
+          -*) args+=("$arg") ;;
+          *) if [ "$filter" -eq 0 ]; then args+=("$arg"); filter=1
+             else args+=("$(cygpath -m "$arg")"); fi ;;
+        esac
+      done
+      MSYS_NO_PATHCONV=1 jq -b "${args[@]}" ;;
+    *) jq "$@" ;;
+  esac
 }
 
 # Resolve the handoff data directory. Stays at ~/.claude/handoff/ for

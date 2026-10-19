@@ -1,6 +1,8 @@
 # PLAN — `claude-state` (renamed from claude-code-handoff) v0.4 → v1.0
 
-Status: **proposal, not implemented.** One repo, restructured into modular subdirs, renamed to reflect broader scope, with a clear publishing path. Three milestones, each fully back-compatible. Targeting one tagged release per milestone, then a v1.0 once the plugin contract is locked.
+Status: **historical design proposal, superseded by the shipped v1.0 implementation and v1.1 reliability work.** See [README.md](README.md), [CHANGELOG.md](CHANGELOG.md), and [MIGRATION.md](MIGRATION.md) for current behavior. The remaining text is retained as design history, not installation instructions.
+
+Original proposal: One repo, restructured into modular subdirs, renamed to reflect broader scope, with a clear publishing path. Three milestones, each fully back-compatible. Targeting one tagged release per milestone, then a v1.0 once the plugin contract is locked.
 
 ---
 

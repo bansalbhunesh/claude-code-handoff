@@ -79,11 +79,7 @@ test_fallback_to_most_recent() {
   # the most recently modified file (bar.md).
   out=$(jq -nc --arg sid "missing" '{session_id:$sid, source:"compact"}' \
         | HOME="$home" bash "$RESUME")
-  assert '[ -n "$out" ]' "should emit output via mtime fallback"
-  local ctx
-  ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
-  assert 'printf "%s" "$ctx" | grep -q "NEWEST CONTENT"' \
-    "should fall back to newest packet on session_id miss"
+  assert '[ -z "$out" ]' "no workspace must mean no global automatic fallback"
 }
 
 test_valid_json_shape() {
@@ -126,7 +122,7 @@ test_utf8_truncation_at_16000_codepoints() {
   # 2) The truncation marker must appear in additionalContext.
   local ctx
   ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
-  assert 'printf "%s" "$ctx" | grep -q "(truncated; full packet at"' \
+  assert 'printf "%s" "$ctx" | grep -q "Excerpt only; read the full packet"' \
     "truncation marker must appear when over the cap"
 }
 
@@ -140,7 +136,7 @@ test_small_packet_no_truncation_marker() {
         | HOME="$home" bash "$RESUME")
   local ctx
   ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
-  assert '! printf "%s" "$ctx" | grep -q "(truncated; full packet at"' \
+  assert 'printf "%s" "$ctx" | grep -q "Full packet:"' \
     "no truncation marker on small packets"
   assert 'printf "%s" "$ctx" | grep -q "small content"' \
     "small packet content must round-trip"
@@ -219,9 +215,9 @@ test_empty_stdin_silent() {
 run "resume: no handoff dir"                    test_no_handoff_dir
 run "resume: empty handoff dir"                 test_empty_handoff_dir
 run "resume: session_id match preferred"        test_session_id_match_preferred
-run "resume: fallback to most-recent on miss"   test_fallback_to_most_recent
+run "resume: refuses global fallback"   test_fallback_to_most_recent
 run "resume: valid JSON output shape"           test_valid_json_shape
-run "resume: UTF-8 16K codepoint truncation"    test_utf8_truncation_at_16000_codepoints
+run "resume: bounded UTF-8 context"    test_utf8_truncation_at_16000_codepoints
 run "resume: small packet no truncation marker" test_small_packet_no_truncation_marker
 run "resume: symlinked packet refused"          test_symlinked_target_refused
 run "resume: symlinked handoff dir refused"     test_symlinked_handoff_dir_refused

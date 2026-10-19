@@ -43,8 +43,8 @@ test_auto_install_wires_session_start() {
   # SessionStart should have both 'compact' and 'resume' matchers.
   local matchers
   matchers=$(jq -r '[.hooks.SessionStart[]?.matcher] | sort | join(",")' "$tmp/settings.json")
-  assert '[ "$matchers" = "compact,resume" ]' \
-    "SessionStart matchers should be 'compact,resume' (got '$matchers')"
+  assert '[ "$matchers" = "clear,compact,fork,resume,startup" ]' \
+    "SessionStart matchers should be 'clear,compact,fork,resume,startup' (got '$matchers')"
   # And both should point at handoff-resume.sh.
   local cmds
   cmds=$(jq -r '[.hooks.SessionStart[].hooks[].command] | unique | join(",")' "$tmp/settings.json")

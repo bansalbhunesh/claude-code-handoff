@@ -19,66 +19,27 @@ fi
 # shellcheck source=../../lib/common.sh
 . "$__cs_dir/lib/common.sh"
 
+# shellcheck source=../../lib/handoff.sh
+. "$__cs_dir/lib/handoff.sh"
 payload=$(cat)
-# Reject malformed/empty payloads silently.
-printf '%s' "$payload" | jq -e 'type=="object"' >/dev/null 2>&1 || exit 0
-
-session_id=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)
-source_field=$(printf '%s' "$payload" | jq -r '.source // "unknown"' 2>/dev/null)
-
+printf '%s' "$payload" | cs_jq -e 'type=="object" and (.session_id|type=="string") and ((.cwd // "")|type=="string")' >/dev/null 2>&1 || exit 0
+session_id=$(printf '%s' "$payload" | cs_jq -r '.session_id')
+is_valid_session_id "$session_id" || exit 0
+source_field=$(printf '%s' "$payload" | cs_jq -r '.source // "unknown"')
+case "$source_field" in startup|resume|compact|clear|fork) ;; *) exit 0 ;; esac
+cwd=$(printf '%s' "$payload" | cs_jq -r '.cwd // ""')
 handoff_dir=$(cs_handoff_dir)
-[ -d "$handoff_dir" ] || exit 0
-[ -L "$handoff_dir" ] && exit 0
-
-# Prefer a packet matching this session_id; otherwise fall back to the
-# most recently modified non-symlink, readable packet. The readability
-# check matters because Claude Code surfaces SessionStart hook stderr
-# to the user — without it, an unreadable target would dump 200+ bytes
-# of "jq: Bad JSON in --rawfile … Permission denied" noise.
-target=""
-if [ -n "$session_id" ] \
-   && [ -f "$handoff_dir/$session_id.md" ] \
-   && [ ! -L "$handoff_dir/$session_id.md" ] \
-   && [ -r "$handoff_dir/$session_id.md" ]; then
-  target="$handoff_dir/$session_id.md"
+[ -d "$handoff_dir" ] && [ ! -L "$handoff_dir" ] || exit 0
+target="$handoff_dir/$session_id.md"
+if [ ! -f "$target" ] || [ -L "$target" ] || [ ! -r "$target" ]; then
+  target=""
+elif [ -n "$cwd" ] && ! packet_matches_workspace "$target" "$cwd"; then
+  target=""
 fi
+# A missing exact match may only fall back within the current worktree.
 if [ -z "$target" ]; then
-  while IFS= read -r f; do
-    [ -L "$f" ] && continue
-    [ -f "$f" ] || continue
-    [ -r "$f" ] || continue
-    target="$f"
-    break
-  done < <(ls -t "$handoff_dir"/*.md 2>/dev/null)
+  target=$(handoff_pick_workspace "$cwd") || exit 0
 fi
-
-[ -n "$target" ] || exit 0
-[ -f "$target" ] || exit 0
-[ -L "$target" ] && exit 0
-[ -r "$target" ] || exit 0
-
-prior_id=$(basename "$target" .md)
-
-# UTF-8-safe codepoint truncation via jq's --rawfile + codepoint slicing.
-max_codepoints=16000
-
-jq -nc \
-  --rawfile rawctx "$target" \
-  --arg src "$source_field" \
-  --arg prior "$prior_id" \
-  --argjson max "$max_codepoints" \
-  '
-  ($rawctx | length) as $len
-  | (if $len > $max
-       then ($rawctx | .[0:$max]) + "\n\n…(truncated; full packet at ~/.claude/handoff/" + $prior + ".md)"
-       else $rawctx
-     end) as $ctx
-  | {
-      hookSpecificOutput: {
-        hookEventName: "SessionStart",
-        additionalContext: ("[claude-state] Resuming after " + $src + ". Loading packet from session " + $prior + ". Treat the contents below as background context for what was being worked on; ask the user to confirm before acting on it.\n\n---\n\n" + $ctx)
-      }
-    }
-  ' 2>/dev/null
-
+ctx=$(handoff_context "$target" "$cwd" "$source_field" | cs_jq -r .) || exit 0
+printf '%s' "$ctx" | cs_jq -Rs '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:.}}'
 exit 0

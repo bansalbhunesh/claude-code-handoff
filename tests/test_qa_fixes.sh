@@ -73,7 +73,7 @@ test_f1_install_ships_all_v04_files() {
     claude-state/modules/handoff/snapshot.sh \
     claude-state/modules/handoff/resume.sh \
     claude-state/modules/workspaces/workspaces.sh \
-    commands/resume.md
+    commands/handoff-resume.md
   do
     assert "[ -f \"$cdir/$rel\" ]" "installer must place $rel"
   done

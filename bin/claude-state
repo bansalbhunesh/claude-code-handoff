@@ -6,7 +6,7 @@
 
 set -uo pipefail
 
-CS_VERSION="1.0.0"
+CS_VERSION="1.1.0"
 
 # Resolve any symlink chain so the upward walk for lib/common.sh starts
 # from the script's REAL on-disk location, not the symlink path. This
@@ -44,6 +44,8 @@ fi
 . "$__cs_dir/lib/common.sh"
 # shellcheck source=../lib/workspace.sh
 . "$__cs_dir/lib/workspace.sh"
+# shellcheck source=../lib/handoff.sh
+. "$__cs_dir/lib/handoff.sh"
 
 claude_dir=$(cs_claude_dir)
 handoff_dir=$(cs_handoff_dir)
@@ -188,14 +190,14 @@ cmd_edit() {
 }
 
 cmd_status() {
-  local cmd_file="$claude_dir/commands/resume.md"
+  local cmd_file="$claude_dir/commands/handoff-resume.md"
 
   echo "claude-state status"
   echo "  version (cli):      $CS_VERSION"
 
   if command -v jq >/dev/null 2>&1; then
     local jqv
-    jqv=$(jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
+    jqv=$(cs_jq --version 2>/dev/null | sed -E 's/^jq-//; s/^jq //')
     echo "  jq:                 $jqv"
   else
     echo "  jq:                 NOT INSTALLED (required by snapshot+resume scripts)"
@@ -219,14 +221,14 @@ cmd_status() {
   else
     echo "  resume script:      MISSING"
   fi
-  echo "  /resume command:    $([ -f "$cmd_file" ] && echo 'installed' || echo 'MISSING')"
+  echo "  /handoff-resume:    $([ -f "$cmd_file" ] && echo 'installed' || echo 'MISSING')"
 
   if [ -f "$settings" ]; then
     if command -v jq >/dev/null 2>&1; then
       local has_pre has_end has_start auto_mode
-      has_pre=$(jq -r 'any((.hooks.PreCompact // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh$")))' "$settings" 2>/dev/null)
-      has_end=$(jq -r 'any((.hooks.SessionEnd // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh$")))' "$settings" 2>/dev/null)
-      has_start=$(jq -r 'any((.hooks.SessionStart // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-resume|modules/handoff/resume)\\.sh$")))' "$settings" 2>/dev/null)
+      has_pre=$(cs_jq -r 'any((.hooks.PreCompact // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh[\u0027\"]?$")))' "$settings" 2>/dev/null)
+      has_end=$(cs_jq -r 'any((.hooks.SessionEnd // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-snapshot|modules/handoff/snapshot)\\.sh[\u0027\"]?$")))' "$settings" 2>/dev/null)
+      has_start=$(cs_jq -r 'any((.hooks.SessionStart // [])[]; (.hooks // []) | any((.command // "") | test("/(handoff-resume|modules/handoff/resume)\\.sh[\u0027\"]?$")))' "$settings" 2>/dev/null)
       [ "$has_start" = "true" ] && auto_mode="auto" || auto_mode="manual"
       echo "  PreCompact hook:    $([ "$has_pre" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
       echo "  SessionEnd hook:    $([ "$has_end" = "true" ] && echo 'wired' || echo 'NOT WIRED')"
@@ -298,33 +300,7 @@ cmd_prune() {
 
 # Workspace-aware: newest packet whose `- workspace: <id>` matches the
 # resolved id for $cwd. Echoes the path; returns 1 if no match.
-resume_pick_workspace() {
-  local cwd="$1"
-  local target_ws
-  target_ws=$(workspace_id_for_cwd "$cwd") || return 1
-  [ -n "$target_ws" ] || return 1
-  # Match against the packet's `workspace:` field, or — for v0.3 packets
-  # that predate the field — backfill from the `cwd:` field the same way
-  # `workspaces rebuild` does.
-  local f packet_ws packet_cwd
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    # Bound the awk scan to the frontmatter section (stop at first blank
-    # line) so body content can't forge a `- workspace:` line.
-    packet_ws=$(awk '/^$/ {exit} /^- workspace: / {print $3; exit}' "$f")
-    if [ -z "$packet_ws" ]; then
-      packet_cwd=$(awk '/^$/ {exit} /^- cwd: / {sub(/^- cwd: /, ""); print; exit}' "$f")
-      if [ -n "$packet_cwd" ]; then
-        packet_ws=$(workspace_id_for_cwd "$packet_cwd" 2>/dev/null) || packet_ws=""
-      fi
-    fi
-    if [ "$packet_ws" = "$target_ws" ]; then
-      printf '%s\n' "$f"
-      return 0
-    fi
-  done < <(list_packets_by_mtime "$handoff_dir")
-  return 1
-}
+resume_pick_workspace() { handoff_pick_workspace "$1"; }
 
 # Score packets by distinct-keyword hits (case-insensitive). Tiebreak
 # by recency (mtime), since list_packets_by_mtime already yields newest
@@ -333,11 +309,12 @@ resume_pick_workspace() {
 # Caller (cmd_resume) is responsible for rejecting empty/whitespace-only
 # `keywords` input with a usage error (rc=2) before calling here.
 resume_pick_keywords() {
-  local keywords="$1"
+  local keywords="$1" all_projects="${2:-0}"
   [ -n "$keywords" ] || return 1
   local f best_score=0 best_path="" score kw
   while IFS= read -r f; do
     [ -z "$f" ] && continue
+    if [ "$all_projects" -ne 1 ] && ! packet_matches_workspace "$f" "$(pwd)"; then continue; fi
     score=0
     # Word-split on default IFS at iteration time (rather than building
     # an array first). Earlier code used `local kws=( $keywords )` plus
@@ -348,7 +325,7 @@ resume_pick_keywords() {
     # shellcheck disable=SC2086  # intentional word splitting
     for kw in $keywords; do
       [ -z "$kw" ] && continue
-      if grep -qi "$kw" "$f" 2>/dev/null; then
+      if grep -qiF -- "$kw" "$f" 2>/dev/null; then
         score=$((score + 1))
       fi
     done
@@ -362,10 +339,14 @@ resume_pick_keywords() {
 }
 
 cmd_resume() {
-  local mode="auto" target="" keywords="" positional=""
+  local mode="auto" target="" keywords="" positional="" output="text" all_projects=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --here)         mode="here";    shift ;;
+      --all-projects) all_projects=1; shift ;;
+      --path)         output="path"; shift ;;
+      --json)         output="json"; shift ;;
+      --context)      output="context"; shift ;;
       --keywords)     mode="keywords"; shift; keywords="${1:-}"; shift || true ;;
       -h|--help)
         cat <<USAGE
@@ -374,8 +355,8 @@ claude-state resume — smart resume into a prior session's packet.
 Usage:
   claude-state resume                       Workspace-aware default. Picks the
                                             newest packet whose workspace matches
-                                            the current cwd; falls back to the
-                                            global newest if no match.
+                                            the current worktree. No global
+                                            fallback without --all-projects.
   claude-state resume <session-id>          Specific packet by id.
   claude-state resume --here                Require workspace match. Errors out
                                             if cwd is not in a known workspace.
@@ -383,8 +364,13 @@ Usage:
                                             print the winner.
   claude-state resume <free text>           Same as --keywords if input is not
                                             a known session id.
+  --all-projects                           Allow cross-project keyword search
+                                            or global fallback (explicit opt-in).
+  --path | --json | --context               Emit a path, structured packet with
+                                            warnings, or a bounded excerpt.
 USAGE
         return 0 ;;
+      --*)            err "resume: unknown option $1"; return 2 ;;
       *)              if [ -z "$positional" ]; then positional="$1"
                       else                          positional="$positional $1"
                       fi
@@ -422,7 +408,7 @@ USAGE
           err "resume --keywords: argument is empty or whitespace-only"
           return 2
         fi
-        target=$(resume_pick_keywords "$keywords") || target=""
+        target=$(resume_pick_keywords "$keywords" "$all_projects") || target=""
         if [ -z "$target" ]; then
           err "resume: no packets matched keywords '$keywords'"
           return 1
@@ -430,21 +416,30 @@ USAGE
         ;;
       auto|*)
         target=$(resume_pick_workspace "$(pwd)") || target=""
-        if [ -z "$target" ]; then
+        if [ -z "$target" ] && [ "$all_projects" -eq 1 ]; then
           target=$(list_packets_by_mtime "$handoff_dir" | head -1)
         fi
         ;;
     esac
   fi
 
-  [ -n "$target" ]    || { err "resume: no packets found in $handoff_dir"; return 1; }
+  [ -n "$target" ]    || { err "resume: no matching packet for this workspace; use --all-projects to allow global fallback"; return 1; }
   [ -f "$target" ]    || { err "resume: target packet missing: $target"; return 1; }
   [ ! -L "$target" ] || { err "resume: refusing symlinked packet: $target"; return 1; }
 
-  local sid
+  [ ! -L "$handoff_dir" ] || { err "resume: refusing symlinked packet directory"; return 1; }
+  local sid warnings
   sid=$(basename "$target" .md)
-  printf -- '── claude-state resume: %s ──\n' "$sid"
-  cat "$target"
+  warnings=$(handoff_warnings "$target" "$(pwd)")
+  case "$output" in
+    path) printf '%s\n' "$target" ;;
+    context) handoff_context "$target" "$(pwd)" manual | cs_jq -r . ;;
+    json) cs_jq -n --arg id "$sid" --arg path "$target" --arg warnings "$warnings" --rawfile content "$target" \
+      '{version:1, session_id:$id, path:$path, warnings:($warnings|split("\n")|map(select(length>0))), content:$content}' ;;
+    *) printf -- '── claude-state resume: %s ──\n' "$sid"
+       [ -z "$warnings" ] || printf '%s\n' "$warnings"
+       cat "$target" ;;
+  esac
 }
 
 cmd_workspaces() {
@@ -459,6 +454,26 @@ cmd_memory() {
   exec "$__cs_dir/modules/memory/memory.sh" "$@"
 }
 
+cmd_checkpoint() {
+  local transcript="" sid="" cwd output
+  cwd=$(pwd)
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --transcript|--session|--cwd)
+        [ "$#" -ge 2 ] || { err "checkpoint: missing value for $1"; return 2; }
+        case "$1" in --transcript) transcript="$2" ;; --session) sid="$2" ;; --cwd) cwd="$2" ;; esac
+        shift 2 ;;
+      *) err 'Usage: claude-state checkpoint --transcript FILE --session ID [--cwd DIR]'; return 2 ;;
+    esac
+  done
+  is_valid_session_id "$sid" && [ -f "$transcript" ] && [ -d "$cwd" ] || { err 'checkpoint: valid session id, transcript file and project directory required'; return 2; }
+  output=$(cs_jq -nc --arg sid "$sid" --arg tx "$transcript" --arg cwd "$cwd" \
+    '{session_id:$sid,transcript_path:$tx,cwd:$cwd,hook_event_name:"ManualCheckpoint"}' |
+    CS_REPORT_PATH=1 bash "$__cs_dir/modules/handoff/snapshot.sh") || return 1
+  [ -n "$output" ] && [ -f "$output" ] || { err 'checkpoint: no packet written'; return 1; }
+  printf '%s\n' "$output"
+}
+
 cmd_help() {
   cat <<USAGE
 claude-state $CS_VERSION — persistent state for Claude Code (handoff packets, workspaces).
@@ -469,7 +484,10 @@ Commands:
   list                       List packets, newest first.
   view [<session-id>]        View a packet (default: most recent).
   resume [<id|keywords>] [--here] [--keywords "..."]
-                             Smart resume: workspace-aware by default.
+                             Recover current-worktree context. See resume --help
+                             for --all-projects, --json, --path and --context.
+  checkpoint --transcript FILE --session ID [--cwd DIR]
+                             Save a checkpoint from an existing transcript.
   workspaces ...             Manage workspaces (list, show, rebuild, rename).
   signal <packet> [--explain] [--threshold N] [--raw]
                              Re-score a packet's reasoning section.
@@ -486,7 +504,10 @@ Commands:
   help                       Show this help.
 
 Environment:
-  CLAUDE_HOME       Override the default ~/.claude location.
+  CLAUDE_CONFIG_DIR Override the default ~/.claude location (preferred).
+  CLAUDE_HOME       Legacy fallback when CLAUDE_CONFIG_DIR is unset.
+  CS_MEMORY_DIR    Explicit native memory directory when discovery is unavailable.
+  HANDOFF_REDACT   Set to 0 to disable best-effort credential filtering.
   HANDOFF_KEEP_N    When set on snapshot script (in your shell or hook
                     env), keep only N newest packets after each write.
   HANDOFF_DEBUG     When non-empty on the snapshot script, append a
@@ -510,6 +531,7 @@ case "${1:-}" in
   list)            shift; cmd_list "$@" ;;
   view)            shift; cmd_view "$@" ;;
   resume)          shift; cmd_resume "$@" ;;
+  checkpoint)      shift; cmd_checkpoint "$@" ;;
   workspaces|ws)   shift; cmd_workspaces "$@" ;;
   signal)          shift; cmd_signal "$@" ;;
   memory|mem)      shift; cmd_memory "$@" ;;

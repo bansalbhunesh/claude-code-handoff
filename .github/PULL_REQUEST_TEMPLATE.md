@@ -16,7 +16,7 @@ case. If you tested against a real Claude Code session, describe the round trip.
 ## Checklist
 
 - [ ] `bash tests/run-all.sh` is green
-- [ ] `shellcheck install.sh uninstall.sh scripts/*.sh tests/*.sh bin/claude-handoff` is clean
+- [ ] `shellcheck install.sh uninstall.sh lib/*.sh modules/*/*.sh tests/*.sh bin/claude-state bin/claude-handoff` is clean
 - [ ] New user-visible behavior has a test exercising it
 - [ ] `README.md` reflects the change (if user-facing)
 - [ ] `CHANGELOG.md` has an entry under the right version section

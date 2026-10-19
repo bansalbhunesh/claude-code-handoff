@@ -1,5 +1,30 @@
 # Migration guide
 
+## v1.0 → v1.1
+
+Fetch the update and rerun the installer from the repository:
+
+```bash
+git pull
+bash install.sh          # or: bash install.sh --auto
+claude-state status
+```
+
+Use the same configuration location as before. `CLAUDE_CONFIG_DIR` now takes precedence over `CLAUDE_HOME`; the default is still `~/.claude`. Existing packets remain readable and are not rewritten. Settings changes receive a backup.
+
+- Use `/handoff-resume` to recover a packet. Native `/resume` is left available. The installer removes an exact copy of this project's old command, but preserves customized `commands/resume.md` files for your review.
+- `claude-state resume` and keyword selection now stay within the current worktree. Add `--all-projects` for deliberate cross-project fallback/search, or supply an explicit session ID. Automatic hooks never use global fallback.
+- `--auto` registers startup, resume, compact, clear, and fork restoration. Running the installer without it returns to manual restore mode while retaining capture hooks.
+- Credentials matching common patterns are filtered from **new** packets by default. This is not a complete secret scanner and does not sanitize existing packets or original transcripts. Review packets before sharing.
+- Native memory discovery opens an existing store, including repository-shared worktree memory. If it cannot identify the store, use the path shown by Claude Code's `/memory`: `export CS_MEMORY_DIR='/absolute/path/to/memory'`. Do not move or delete old memory directories just to make discovery succeed.
+- `MEMORY.md` rebuilds update a marked block and retain surrounding notes. Existing unmarked content is preserved; remove duplicate old generated entries manually if necessary.
+- Hooks remain best effort and silent on invalid inputs. A forced process kill may not produce a snapshot. Use `checkpoint` with a known transcript path for a deliberate capture.
+
+The portable skill at `skills/session-handoff/` can also be installed by itself. It provides a workflow, not automatic capture or access to another agent's private history.
+
+The historical migration notes below describe the older releases. Their global-fallback and `/resume` behavior has been superseded by v1.1.
+
+
 ## v0.3 → v0.4 (claude-code-handoff → claude-state)
 
 The project was renamed in v0.4.0. The scope outgrew "handoff" — v0.4 adds workspaces, with signal scoring (v0.5) and structured memory (v0.6) on the roadmap ([PLAN.md](PLAN.md)).
@@ -23,7 +48,7 @@ That's it. The installer:
 
 ### What changes for you
 
-- **The CLI is now `claude-state`.** `claude-handoff` keeps working through one minor cycle (removed in v0.6), but it prints a one-line deprecation warning to stderr and forwards. Update your muscle memory and any aliases.
+- **The CLI is now `claude-state`.** `claude-handoff` remains available as a compatibility shim, but it prints a one-line deprecation warning to stderr and forwards. Update your muscle memory and any aliases.
 - **Help text and `status` output reference the new layout.** No flags changed; all existing subcommands (`list`, `view`, `search`, `chain`, `edit`, `path`, `status`, `prune`) work identically.
 - **New subcommands:**
   - `claude-state workspaces` (alias `ws`) — list/show/rebuild/rename workspaces.

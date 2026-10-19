@@ -7,7 +7,7 @@ Thanks for your interest. This is a small repo with a clear scope, so the contri
 Most welcome:
 
 - **Failure-case reports.** Paste a redacted packet that should have looked different and tell me what you expected. One example is enough to derive a regression test.
-- **Cross-platform fixes.** Particularly Linux / Windows-Git-Bash / WSL quirks around `stat`, `find`, `date`, `mktemp`, `head -c`. The CI matrix only covers macOS and Ubuntu today.
+- **Cross-platform fixes.** Particularly Linux / Windows-Git-Bash / WSL quirks around `stat`, `find`, `date`, `mktemp`, `head -c`. The CI matrix covers Ubuntu, macOS, and Windows Git Bash.
 - **Better goal extraction.** The current heuristic uses JSONL `isCompactSummary` / `isMeta` flags + a `<` / `⏺` prefix fallback. If you find transcript shapes where it falls down, send a sample.
 - **Documentation improvements.** Clearer phrasing, missing edge cases in the FAQ, examples that didn't occur to me.
 
@@ -33,7 +33,7 @@ Everything beyond `install.sh` runs against an isolated `mktemp -d` so your real
 bash tests/run-all.sh
 ```
 
-Expected: `62 tests, 62 pass, 0 fail`. The same suite runs in CI on `ubuntu-latest` and `macos-latest` for every push and PR.
+Expected: `147 tests, 147 pass, 0 fail`. The same suite runs in CI on `ubuntu-latest`, `macos-latest`, and `windows-latest` for main-branch pushes and pull requests.
 
 To run a single suite while debugging:
 
@@ -48,8 +48,10 @@ To add a new test case, follow the pattern in the existing files: a `t_*()` func
 - **Shell:** scripts must be bash 3.2 compatible (macOS default). No associative arrays, no `${var,,}`, no `mapfile`. Use `[[ ... ]]` for tests, `$(cmd)` over backticks, double-quote every variable expansion.
 - **`set -uo pipefail`** for runtime scripts (snapshot, resume) — never block the underlying hook event with `set -e`. Always `exit 0`.
 - **`set -euo pipefail`** for the installers — they should fail fast on any error.
-- **Cross-platform:** prefer POSIX-portable invocations. Where BSD and GNU diverge (`stat`, `head -c` on some Linuxes, etc.), use the `stat -f X 2>/dev/null || stat -c Y` fallback pattern.
+- **Cross-platform:** prefer POSIX-portable invocations. Where BSD and GNU diverge (`stat`, `head -c` on some Linuxes, etc.), use the `stat -c Y 2>/dev/null || stat -f X` fallback pattern.
 - **No eval, no command substitution on user-controlled data.** Every variable expansion in heredocs and command arguments must be safe under arbitrary content (the JSONL transcript may contain anything).
+
+Runtime JSON operations use `cs_jq` from `lib/common.sh`. It preserves LF output and explicitly converts file operands for native Windows jq while keeping filter text and `--arg` values unchanged. Use synthetic transcripts and isolated configuration/memory directories; never test against a contributor's real conversation history.
 
 ## Commit messages
 
@@ -68,13 +70,13 @@ PRs touching multiple concerns are easier to review when split into multiple com
 
 Before opening a PR:
 
-- [ ] `bash tests/run-all.sh` is green (62/62 or higher with new tests)
-- [ ] `shellcheck install.sh uninstall.sh scripts/*.sh tests/*.sh bin/claude-handoff` is clean
+- [ ] `bash tests/run-all.sh` is green (all suites, including new regression cases)
+- [ ] `shellcheck install.sh uninstall.sh lib/*.sh modules/*/*.sh tests/*.sh bin/claude-state bin/claude-handoff` is clean
 - [ ] If you added a new feature, there's at least one test exercising it
 - [ ] `README.md` is updated if user-visible behavior changed
 - [ ] `CHANGELOG.md` has an entry under `[Unreleased]` (or you note "no entry needed" with a reason)
 
-CI runs the same checks across `ubuntu-latest` and `macos-latest`. Green locally usually means green in CI.
+CI runs the same checks across `ubuntu-latest`, `macos-latest`, and `windows-latest`. Green locally usually means green in CI.
 
 ## Filing issues
 

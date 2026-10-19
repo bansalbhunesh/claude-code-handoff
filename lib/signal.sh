@@ -116,7 +116,7 @@ CS_SIGNAL_FILTER='
 # HANDOFF_SIGNAL_MIN, then 3.
 signal_filter() {
   local threshold="${1:-${HANDOFF_SIGNAL_MIN:-3}}"
-  jq --argjson threshold "$threshold" "$CS_SIGNAL_FILTER"
+  cs_jq --argjson threshold "$threshold" "$CS_SIGNAL_FILTER"
 }
 
 # Render a {kept, dropped} object into the textual sections used in a
@@ -132,7 +132,7 @@ signal_filter() {
 # HANDOFF_SIGNAL_DETAILS=0 suppresses it (kept-only output).
 signal_render() {
   local include_details="${HANDOFF_SIGNAL_DETAILS:-1}"
-  jq -r --argjson include_details "$include_details" '
+  cs_jq -r --argjson include_details "$include_details" '
     (.kept | map(.text) | join("\n\n---\n\n")) as $kept_text
     | (.dropped | length) as $dropped_count
     | $kept_text
@@ -151,7 +151,7 @@ signal_render() {
 #   [+] idx  score  reason         <first 60 chars of text>
 #   [-] idx  score  reason         <first 60 chars of text>
 signal_explain() {
-  jq -r '
+  cs_jq -r '
     (.kept   | map(. + {kept: true})) as $k
     | (.dropped | map(. + {kept: false})) as $d
     | ($k + $d) | sort_by(.idx)

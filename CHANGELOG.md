@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Portable `session-handoff` skill for saving and resuming unfinished work with file-capable coding agents. Installing only the skill does not install Claude Code hooks.
+- `claude-state checkpoint --transcript FILE --session ID [--cwd DIR]` for explicit recovery points.
+- `resume --json`, `--path`, and `--context` for integrations and bounded recovery; `--all-projects` for intentional cross-project selection.
+- Latest user request, Git commit/branch/working-tree observations, and observed tool outcomes in packets. Restores warn about changed commits, branches, and snapshots older than 24 hours.
+- Best-effort credential filtering before atomic packet writes; `HANDOFF_REDACT=0` explicitly disables it. Original transcripts remain untouched.
+
+### Fixed
+- Automatic restores and default CLI selection stay within the current project/worktree. A new session no longer falls back to an unrelated project's newest packet.
+- Task tracking uses returned task IDs and requires a successful tool result before applying status updates. Tool return alone is never described as proof that tests passed.
+- Truncated or invalid JSONL lines no longer discard preceding valid transcript records.
+- Entire hook context, including warnings and the full-file pointer, fits a 9,000 UTF-16-unit budget below Claude Code's documented 10,000-character inline limit.
+- Config locations with spaces/apostrophes work with installed hooks and native Windows jq. `CLAUDE_CONFIG_DIR` takes precedence over the legacy `CLAUDE_HOME` override.
+- Native memory discovery accounts for repository-shared memory, configured paths, and explicit project directory names; unrecognized stores require an explicit binding instead of silently creating a guessed location.
+- Memory index rebuilding preserves manually written content outside the generated marker block.
+- The test runner preserves suite exit failures and supports checkout paths containing spaces.
+
+### Changed
+- `/handoff-resume` replaces the custom `/resume`, preserving Claude Code's built-in command. Only an exact old managed command is migrated; customized commands are retained.
+- Opt-in automatic restoration covers `startup`, `resume`, `compact`, `clear`, and `fork`.
+- Documentation distinguishes lossy handoffs, native session resume, durable memory, and ctx-flow. No runtime network calls or additional runtime dependencies were added.
+
+
 ## [1.0.0] - 2026-04-28
 
 **Plugin contract locked.** v1.0.0 is the line where the JSON shape emitted by `claude-state memory query --json` and the frontmatter shape on handoff packets become a stable, versioned contract. Plugins built against `version: 1` will keep working through the entire v1.x line.

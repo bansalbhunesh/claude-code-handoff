@@ -30,23 +30,24 @@ TOTAL_FAIL=0
 TOTAL_FAILED_NAMES=""
 
 shopt -s nullglob 2>/dev/null || true
-test_files=$(ls "$TESTS_DIR"/test_*.sh 2>/dev/null | sort)
+test_files=("$TESTS_DIR"/test_*.sh)
 
-if [ -z "$test_files" ]; then
+if [ "${#test_files[@]}" -eq 0 ]; then
   echo "no test_*.sh files found in $TESTS_DIR" >&2
   exit 1
 fi
 
-for f in $test_files; do
+for f in "${test_files[@]}"; do
   printf '\n# %s\n' "$(basename "$f")"
   # Each test file runs in its own subshell so PASS/FAIL counters and EXIT
   # traps don't leak between files. We capture the per-file counters by
   # having the file print a final `# pass=N fail=N` line we parse.
   out=$(mktemp 2>/dev/null) || out=$(mktemp -t cchandoff-out)
+  suite_rc=0
   if bash "$f" > "$out" 2>&1; then
     :
   else
-    : # Per-file exit code is informational; we trust the printed counters.
+    suite_rc=$?
   fi
   cat "$out"
   # Parse the last `# pass=N fail=N` line.
@@ -54,6 +55,7 @@ for f in $test_files; do
   if [ -n "$summary" ]; then
     p=$(printf '%s' "$summary" | sed -E 's/^# pass=([0-9]+).*/\1/')
     fl=$(printf '%s' "$summary" | sed -E 's/^.*fail=([0-9]+).*/\1/')
+    if [ "$suite_rc" -ne 0 ] && [ "$fl" -eq 0 ]; then fl=1; fi
     TOTAL_PASS=$((TOTAL_PASS + p))
     TOTAL_FAIL=$((TOTAL_FAIL + fl))
     if [ "$fl" -gt 0 ]; then
