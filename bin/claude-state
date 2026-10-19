@@ -466,11 +466,14 @@ cmd_checkpoint() {
       *) err 'Usage: claude-state checkpoint --transcript FILE --session ID [--cwd DIR]'; return 2 ;;
     esac
   done
-  is_valid_session_id "$sid" && [ -f "$transcript" ] && [ -d "$cwd" ] || { err 'checkpoint: valid session id, transcript file and project directory required'; return 2; }
+  if ! is_valid_session_id "$sid" || [[ ! -f "$transcript" || ! -d "$cwd" ]]; then
+    err 'checkpoint: valid session id, transcript file and project directory required'
+    return 2
+  fi
   output=$(cs_jq -nc --arg sid "$sid" --arg tx "$transcript" --arg cwd "$cwd" \
     '{session_id:$sid,transcript_path:$tx,cwd:$cwd,hook_event_name:"ManualCheckpoint"}' |
     CS_REPORT_PATH=1 bash "$__cs_dir/modules/handoff/snapshot.sh") || return 1
-  [ -n "$output" ] && [ -f "$output" ] || { err 'checkpoint: no packet written'; return 1; }
+  if [[ -z "$output" || ! -f "$output" ]]; then err 'checkpoint: no packet written'; return 1; fi
   printf '%s\n' "$output"
 }
 
