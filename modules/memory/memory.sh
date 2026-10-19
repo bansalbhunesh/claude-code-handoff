@@ -23,7 +23,7 @@ fi
 
 # Pre-resolve once so subcommands share state.
 mem_dir=$(cs_memory_dir) || exit 1
-[ -n "$mem_dir" ] && [ ! -L "$mem_dir" ] || { err 'memory: refusing empty or symlinked memory directory'; exit 1; }
+if [[ -z "$mem_dir" || -L "$mem_dir" ]]; then err 'memory: refusing empty or symlinked memory directory'; exit 1; fi
 
 # Resolve a name to an absolute file path.
 mem_path_for() {

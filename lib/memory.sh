@@ -227,7 +227,7 @@ memory_rebuild_index() {
   local dir="${1:-$(cs_memory_dir)}"
   [ -d "$dir" ] || { mkdir -p "$dir"; }
   local index="$dir/MEMORY.md"
-  [ ! -L "$dir" ] && [ ! -L "$index" ] || { err 'memory: refusing symlinked index'; return 1; }
+  if [[ -L "$dir" || -L "$index" ]]; then err 'memory: refusing symlinked index'; return 1; fi
   # Refuse malformed markers rather than discarding the rest of a user's notes.
   if [ -f "$index" ] && ! awk '
     /^<!-- claude-state:start -->$/ {if (inside) bad=1; inside=1}
